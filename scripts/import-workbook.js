@@ -1,7 +1,8 @@
 import path from "node:path";
 import XLSX from "xlsx";
-import { one, run, upsertNamed } from "../src/db.js";
+import { ensureMasterProducts, one, run, upsertNamed } from "../src/db.js";
 import { regenerateRecommendations } from "../src/forecast.js";
+import { PRODUCT_ALIASES } from "../src/master-products.js";
 
 const DEFAULT_WORKBOOK = "/Users/jhaskin/Downloads/Elevated Organics Production Planning Workbook v031225.xlsx";
 const workbookPath = process.argv[2] || DEFAULT_WORKBOOK;
@@ -65,7 +66,7 @@ async function getWeekId(isoDate, serial = null) {
 }
 
 async function findProductId(name, extra = {}) {
-  const clean = text(name);
+  const clean = PRODUCT_ALIASES.get(text(name)) || text(name);
   if (!clean) return null;
   return upsertNamed("products", clean, extra);
 }
@@ -84,6 +85,7 @@ async function clearImportedData() {
     "received_inventory",
     "purchase_orders",
     "inventory_balances",
+    "production_batches",
     "production_plan",
     "formula_tab_lines",
     "product_formulas",
@@ -379,6 +381,7 @@ export async function importWorkbook(filePath) {
   const resolved = path.resolve(filePath);
   const wb = XLSX.readFile(resolved, { cellFormula: true, cellNF: true, cellDates: false });
   await clearImportedData();
+  await ensureMasterProducts();
   const info = await run("INSERT INTO imports (source_file, notes) VALUES (?, ?)", [
     resolved,
     `Imported sheets: ${wb.SheetNames.join(", ")}`,

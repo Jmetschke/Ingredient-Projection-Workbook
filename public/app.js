@@ -11,9 +11,6 @@ const titles = {
   forecast: ["Ingredient Forecast", "Projected usage, receipts, ending inventory, and shortages."],
   inventory: ["Inventory", "Current ingredient setup, cost, lead time, and reorder settings."],
   formulas: ["Formula Manager", "Product-to-ingredient BOM and formula-tab source lines."],
-  purchase: ["Purchase Calendar", "Lead-time adjusted recommendations and imported calendar items."],
-  receiving: ["Receiving", "Record received inventory against the planning week."],
-  velocity: ["Velocity Planner", "Batch size, daily velocity, days of supply, and weeks of supply."],
   reports: ["Reports", "Weekly usage, monthly ingredient cost, and product cost summary."],
   import: ["Import / Export", "Load workbook data into the database and export app tables."],
 };
@@ -110,13 +107,49 @@ async function renderProduction() {
   const data = await api("/api/production-plan");
   const plan = new Map(data.plan.map((p) => [`${p.product_id}:${p.week_id}`, p]));
   const rows = filteredRows(data.products, ["name"]);
-  const html = `<div class="table-wrap"><table><thead><tr><th>Product</th>${data.weeks.map((w) => `<th class="numeric">${w.week_start}</th>`).join("")}</tr></thead><tbody>${
-    rows.map((product) => `<tr><td>${escapeHtml(product.name)}</td>${data.weeks.map((week) => {
+  const batchForm = document.querySelector("#production-batch-form");
+  const batchTypeSelect = batchForm.querySelector("select[name='batch_type']");
+  const productSelect = batchForm.querySelector("select[name='product_id']");
+  const weekSelect = batchForm.querySelector("select[name='week_id']");
+
+  batchTypeSelect.innerHTML = data.batchTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
+  weekSelect.innerHTML = data.weeks.map((week) => `<option value="${week.id}">${week.week_start}</option>`).join("");
+
+  function fillProductionProducts() {
+    const selectedType = batchTypeSelect.value || data.batchTypes[0];
+    productSelect.innerHTML = data.products
+      .filter((product) => product.category === selectedType)
+      .map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`)
+      .join("");
+  }
+
+  fillProductionProducts();
+  batchTypeSelect.onchange = fillProductionProducts;
+  batchForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(batchForm);
+    await api("/api/production-batches", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(form.entries())),
+    });
+    batchForm.querySelector("input[name='quantity']").value = "";
+    await renderProduction();
+  };
+
+  const html = `<div class="table-wrap"><table><thead><tr><th>Batch Type</th><th>Product</th>${data.weeks.map((w) => `<th class="numeric">${w.week_start}</th>`).join("")}</tr></thead><tbody>${
+    rows.map((product) => `<tr><td>${escapeHtml(product.category || "")}</td><td>${escapeHtml(product.name)}</td>${data.weeks.map((week) => {
       const entry = plan.get(`${product.id}:${week.id}`);
       return `<td class="numeric"><input class="editable plan-input" data-product="${product.id}" data-week="${week.id}" type="number" step="1" value="${entry?.planned_qty || 0}"></td>`;
     }).join("")}</tr>`).join("")
   }</tbody></table></div>`;
   document.querySelector("#production-table").innerHTML = html;
+  document.querySelector("#production-batches").innerHTML = table([
+    { label: "Created", key: "created_at" },
+    { label: "Week", key: "week_start" },
+    { label: "Batch Type", key: "batch_type" },
+    { label: "Product", key: "product_name" },
+    { label: "Quantity", numeric: true, value: (r) => qty(r.quantity) },
+  ], filteredRows(data.batches, ["week_start", "batch_type", "product_name"]));
   document.querySelectorAll(".plan-input").forEach((input) => {
     input.addEventListener("change", async () => {
       await api("/api/production-plan", {
@@ -185,34 +218,6 @@ async function renderFormulas() {
   ], filteredRows(data.sourceLines, ["sheet_name", "product_name", "ingredient_name"]));
 }
 
-async function renderPurchase() {
-  const data = await api("/api/purchase-calendar");
-  document.querySelector("#purchase-recommendations").innerHTML = table([
-    { label: "Order Week", key: "order_week" },
-    { label: "Needed Week", key: "needed_week" },
-    { label: "Ingredient", key: "ingredient_name" },
-    { label: "Qty", numeric: true, value: (r) => qty(r.recommended_qty) },
-    { label: "Cost", numeric: true, value: (r) => money(r.estimated_cost) },
-    { label: "Reason", key: "reason" },
-  ], filteredRows(data.recommendations, ["ingredient_name", "order_week", "needed_week"]));
-  document.querySelector("#purchase-imported").innerHTML = table([
-    { label: "Week", key: "week_start" },
-    { label: "Item", key: "item_name" },
-    { label: "Quantity", key: "quantity_text" },
-  ], filteredRows(data.imported, ["week_start", "item_name", "quantity_text"]));
-}
-
-async function renderVelocity() {
-  const rows = await api("/api/velocity");
-  document.querySelector("#velocity-table").innerHTML = table([
-    { label: "Item", key: "item_name" },
-    { label: "Batch Size", numeric: true, value: (r) => qty(r.batch_size_after_waste) },
-    { label: "Velocity / Day", numeric: true, value: (r) => qty(r.velocity_per_day) },
-    { label: "Days Supply", numeric: true, value: (r) => qty(r.days_of_supply) },
-    { label: "Weeks Supply", numeric: true, value: (r) => qty(r.weeks_of_supply) },
-  ], filteredRows(rows, ["item_name"]));
-}
-
 async function renderReports() {
   const data = await api("/api/reports");
   document.querySelector("#monthly-cost").innerHTML = table([
@@ -238,9 +243,6 @@ const renderers = {
   forecast: renderForecast,
   inventory: renderInventory,
   formulas: renderFormulas,
-  purchase: renderPurchase,
-  receiving: async () => {},
-  velocity: renderVelocity,
   reports: renderReports,
   import: async () => {},
 };
@@ -277,17 +279,6 @@ document.querySelector("#formula-form").addEventListener("submit", async (event)
     body: JSON.stringify(Object.fromEntries(form.entries())),
   });
   await renderFormulas();
-});
-
-document.querySelector("#receiving-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  await api("/api/receiving", {
-    method: "POST",
-    body: JSON.stringify(Object.fromEntries(form.entries())),
-  });
-  event.currentTarget.reset();
-  fillSelects();
 });
 
 document.querySelector("#path-import").addEventListener("submit", async (event) => {

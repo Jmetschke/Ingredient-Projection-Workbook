@@ -7,6 +7,7 @@ import XLSX from "xlsx";
 import { all, one, run } from "./src/db.js";
 import { calculateForecast, regenerateRecommendations, weekIdForDate } from "./src/forecast.js";
 import { importWorkbook } from "./scripts/import-workbook.js";
+import { BATCH_TYPES } from "./src/master-products.js";
 
 dotenv.config();
 
@@ -98,14 +99,29 @@ app.patch("/api/ingredients/:id", async (req, res) => {
 app.get("/api/production-plan", async (req, res) => {
   try {
     ok(res, {
+      batchTypes: BATCH_TYPES,
       weeks: await all("SELECT * FROM weeks ORDER BY week_start"),
-      products: await all("SELECT * FROM products WHERE active = 1 ORDER BY name"),
+      products: await all(`
+        SELECT *
+        FROM products
+        WHERE active = 1 AND category IN ('Hijnx', 'Snackbar')
+        ORDER BY category, name
+      `),
       plan: await all(`
         SELECT pp.*, p.name AS product_name, w.week_start
         FROM production_plan pp
         JOIN products p ON p.id = pp.product_id
         JOIN weeks w ON w.id = pp.week_id
+        WHERE p.category IN ('Hijnx', 'Snackbar')
         ORDER BY p.name, w.week_start
+      `),
+      batches: await all(`
+        SELECT pb.*, p.name AS product_name, w.week_start
+        FROM production_batches pb
+        JOIN products p ON p.id = pb.product_id
+        JOIN weeks w ON w.id = pb.week_id
+        ORDER BY pb.created_at DESC, pb.id DESC
+        LIMIT 100
       `),
     });
   } catch (error) {
@@ -124,6 +140,36 @@ app.post("/api/production-plan", async (req, res) => {
     );
     await regenerateRecommendations();
     ok(res, { product_id, week_id, planned_qty: Number(planned_qty) || 0 });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/production-batches", async (req, res) => {
+  try {
+    const { batch_type, product_id, week_id, quantity, notes } = req.body;
+    const product = await one("SELECT * FROM products WHERE id = ?", [product_id]);
+    if (!product) return fail(res, new Error("Unknown product"), 400);
+    if (!BATCH_TYPES.includes(batch_type) || product.category !== batch_type) {
+      return fail(res, new Error("Product does not match selected batch type"), 400);
+    }
+    const qty = Number(quantity) || 0;
+    if (qty <= 0) return fail(res, new Error("Quantity must be greater than zero"), 400);
+
+    const info = await run(
+      `INSERT INTO production_batches (batch_type, product_id, week_id, quantity, notes)
+       VALUES (?, ?, ?, ?, ?)`,
+      [batch_type, product_id, week_id, qty, notes || null],
+    );
+    await run(
+      `INSERT INTO production_plan (product_id, week_id, planned_qty)
+       VALUES (?, ?, ?)
+       ON CONFLICT(product_id, week_id) DO UPDATE
+         SET planned_qty = planned_qty + excluded.planned_qty`,
+      [product_id, week_id, qty],
+    );
+    await regenerateRecommendations();
+    ok(res, { id: info.lastInsertRowid, batch_type, product_id, week_id, quantity: qty });
   } catch (error) {
     fail(res, error);
   }

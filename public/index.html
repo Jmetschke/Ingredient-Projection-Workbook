@@ -15,9 +15,6 @@
         <button data-tab="forecast">Ingredient Forecast</button>
         <button data-tab="inventory">Inventory</button>
         <button data-tab="formulas">Formula Manager</button>
-        <button data-tab="purchase">Purchase Calendar</button>
-        <button data-tab="receiving">Receiving</button>
-        <button data-tab="velocity">Velocity Planner</button>
         <button data-tab="reports">Reports</button>
         <button data-tab="import">Import / Export</button>
       </nav>
@@ -55,10 +52,23 @@
 
       <section id="production" class="view">
         <div class="section-head">
+          <h2>Add Production Batch</h2>
+          <span>Editable input</span>
+        </div>
+        <form id="production-batch-form" class="inline-form">
+          <select name="batch_type" required></select>
+          <select name="product_id" required></select>
+          <select name="week_id" required></select>
+          <input name="quantity" type="number" step="1" min="1" placeholder="Quantity" required>
+          <button>Add Batch</button>
+        </form>
+        <div class="section-head">
           <h2>Weekly Production Quantities</h2>
-          <span>Editable inputs</span>
+          <span>Aggregate plan</span>
         </div>
         <div id="production-table"></div>
+        <h2>Recent Batches</h2>
+        <div id="production-batches"></div>
       </section>
 
       <section id="forecast" class="view">
@@ -93,41 +103,6 @@
         <div id="formula-table"></div>
         <h2>Formula Tab Source Lines</h2>
         <div id="formula-lines"></div>
-      </section>
-
-      <section id="purchase" class="view">
-        <div class="grid two">
-          <section>
-            <h2>Recommended Orders</h2>
-            <div id="purchase-recommendations"></div>
-          </section>
-          <section>
-            <h2>Workbook Purchase Calendar</h2>
-            <div id="purchase-imported"></div>
-          </section>
-        </div>
-      </section>
-
-      <section id="receiving" class="view">
-        <div class="section-head">
-          <h2>Receive Inventory</h2>
-          <span>Editable movement</span>
-        </div>
-        <form id="receiving-form" class="inline-form">
-          <select name="ingredient_id" required></select>
-          <input name="date" type="date" required>
-          <input name="quantity_received" type="number" step="0.0001" placeholder="Quantity" required>
-          <input name="notes" placeholder="Notes">
-          <button>Record Receipt</button>
-        </form>
-      </section>
-
-      <section id="velocity" class="view">
-        <div class="section-head">
-          <h2>Velocity Planner</h2>
-          <span>Batch size and days/weeks of supply</span>
-        </div>
-        <div id="velocity-table"></div>
       </section>
 
       <section id="reports" class="view">

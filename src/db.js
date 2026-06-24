@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@libsql/client";
 import dotenv from "dotenv";
+import { MASTER_PRODUCTS } from "./master-products.js";
 
 dotenv.config();
 
@@ -97,3 +98,22 @@ export async function upsertNamed(table, name, extra = {}) {
 }
 
 await initDb();
+
+export async function ensureMasterProducts() {
+  for (const product of MASTER_PRODUCTS) {
+    const existing = await one("SELECT id FROM products WHERE name = ?", [product.name]);
+    if (existing) {
+      await run(
+        "UPDATE products SET category = ?, active = 1 WHERE id = ?",
+        [product.batchType, existing.id],
+      );
+    } else {
+      await run(
+        "INSERT INTO products (name, category, source_sheet, active) VALUES (?, ?, 'Master Product List', 1)",
+        [product.name, product.batchType],
+      );
+    }
+  }
+}
+
+await ensureMasterProducts();

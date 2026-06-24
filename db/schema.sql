@@ -93,6 +93,16 @@ CREATE TABLE IF NOT EXISTS production_plan (
   UNIQUE(product_id, week_id)
 );
 
+CREATE TABLE IF NOT EXISTS production_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_type TEXT NOT NULL,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  week_id INTEGER NOT NULL REFERENCES weeks(id) ON DELETE CASCADE,
+  quantity REAL NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS inventory_balances (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ingredient_id INTEGER NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
@@ -165,6 +175,8 @@ CREATE TABLE IF NOT EXISTS purchasing_recommendations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_production_week ON production_plan(week_id);
+CREATE INDEX IF NOT EXISTS idx_batches_product_week ON production_batches(product_id, week_id);
+CREATE INDEX IF NOT EXISTS idx_batches_week ON production_batches(week_id);
 CREATE INDEX IF NOT EXISTS idx_formula_product ON product_formulas(product_id);
 CREATE INDEX IF NOT EXISTS idx_formula_ingredient ON product_formulas(ingredient_id);
 CREATE INDEX IF NOT EXISTS idx_receipts_week ON received_inventory(week_id);
