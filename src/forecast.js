@@ -1,4 +1,4 @@
-import { all, db, one, run } from "./db.js";
+import { all, one, run } from "./db.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -12,30 +12,30 @@ function leadWeeks(days) {
   return Math.max(0, Math.ceil((Number(days) || 0) / 7));
 }
 
-function nearestWeekId(weekStart) {
-  const exact = one("SELECT id FROM weeks WHERE week_start = ?", [weekStart]);
+async function nearestWeekId(weekStart) {
+  const exact = await one("SELECT id FROM weeks WHERE week_start = ?", [weekStart]);
   if (exact) return exact.id;
-  return one("SELECT id FROM weeks WHERE week_start <= ? ORDER BY week_start DESC LIMIT 1", [weekStart])?.id
-    || one("SELECT id FROM weeks ORDER BY week_start ASC LIMIT 1")?.id;
+  return (await one("SELECT id FROM weeks WHERE week_start <= ? ORDER BY week_start DESC LIMIT 1", [weekStart]))?.id
+    || (await one("SELECT id FROM weeks ORDER BY week_start ASC LIMIT 1"))?.id;
 }
 
-export function calculateForecast() {
-  const weeks = all("SELECT * FROM weeks ORDER BY week_start");
-  const ingredients = all("SELECT * FROM ingredients WHERE active = 1 ORDER BY name");
-  const usageRows = all(`
+export async function calculateForecast() {
+  const weeks = await all("SELECT * FROM weeks ORDER BY week_start");
+  const ingredients = await all("SELECT * FROM ingredients WHERE active = 1 ORDER BY name");
+  const usageRows = await all(`
     SELECT pf.ingredient_id, pp.week_id, SUM(pp.planned_qty * COALESCE(pf.quantity_per_unit, 0)) AS required_usage
     FROM production_plan pp
     JOIN product_formulas pf ON pf.product_id = pp.product_id
     GROUP BY pf.ingredient_id, pp.week_id
   `);
-  const receipts = all(`
+  const receipts = await all(`
     SELECT ingredient_id, week_id, SUM(quantity_received) AS quantity_received
     FROM received_inventory
     GROUP BY ingredient_id, week_id
   `);
   const usage = new Map(usageRows.map((r) => [`${r.ingredient_id}:${r.week_id}`, Number(r.required_usage) || 0]));
   const receiptMap = new Map(receipts.map((r) => [`${r.ingredient_id}:${r.week_id}`, Number(r.quantity_received) || 0]));
-  const importedBalances = all("SELECT ingredient_id, week_id, beginning_qty FROM inventory_balances");
+  const importedBalances = await all("SELECT ingredient_id, week_id, beginning_qty FROM inventory_balances");
   const balanceMap = new Map(importedBalances.map((r) => [`${r.ingredient_id}:${r.week_id}`, Number(r.beginning_qty) || 0]));
 
   const output = [];
@@ -90,22 +90,21 @@ export function calculateForecast() {
   return { weeks, ingredients, rows: output, recommendations: recs };
 }
 
-export function regenerateRecommendations() {
-  const { recommendations } = calculateForecast();
-  db.transaction(() => {
-    run("DELETE FROM purchasing_recommendations");
-    const insert = db.prepare(`
+export async function regenerateRecommendations() {
+  const { recommendations } = await calculateForecast();
+  await run("DELETE FROM purchasing_recommendations");
+  for (const rec of recommendations) {
+    await run(`
       INSERT INTO purchasing_recommendations
         (ingredient_id, needed_week_id, order_week_id, recommended_qty, projected_ending_qty, estimated_cost, reason)
       VALUES
         (@ingredient_id, @needed_week_id, @order_week_id, @recommended_qty, @projected_ending_qty, @estimated_cost, @reason)
-    `);
-    for (const rec of recommendations) insert.run(rec);
-  })();
+    `, rec);
+  }
   return recommendations;
 }
 
-export function weekIdForDate(dateText) {
+export async function weekIdForDate(dateText) {
   const date = new Date(`${dateText}T00:00:00Z`);
   const day = date.getUTCDay();
   const mondayOffset = day === 0 ? -6 : 1 - day;
@@ -113,6 +112,6 @@ export function weekIdForDate(dateText) {
   return nearestWeekId(monday.toISOString().slice(0, 10));
 }
 
-export function expectedWeekFromLead(orderWeekStart, leadTimeDays) {
+export async function expectedWeekFromLead(orderWeekStart, leadTimeDays) {
   return nearestWeekId(addDays(orderWeekStart, leadTimeDays || 0));
 }

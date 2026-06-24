@@ -1,51 +1,99 @@
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const dbPath = process.env.DATABASE_PATH || "./data/planning.db";
-const resolvedPath = path.resolve(dbPath);
-fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+const tursoUrl = process.env.TURSO_DATABASE_URL;
+const tursoToken = process.env.TURSO_DATABASE_TOKEN || process.env.TURSO_AUTH_TOKEN;
+const localPath = process.env.DATABASE_PATH || "./data/planning.db";
+const databaseUrl = tursoUrl || `file:${path.resolve(localPath)}`;
 
-export const db = new Database(resolvedPath);
-db.pragma("foreign_keys = ON");
-
-const schema = fs.readFileSync(path.resolve("db/schema.sql"), "utf8");
-db.exec(schema);
-
-export function one(sql, params = {}) {
-  return db.prepare(sql).get(params);
+if (!tursoUrl) {
+  fs.mkdirSync(path.dirname(path.resolve(localPath)), { recursive: true });
 }
 
-export function all(sql, params = {}) {
-  return db.prepare(sql).all(params);
+export const db = createClient({
+  url: databaseUrl,
+  authToken: tursoToken,
+});
+
+function normalizeRows(result) {
+  return result.rows.map((row) => Object.fromEntries(Object.entries(row)));
 }
 
-export function run(sql, params = {}) {
-  return db.prepare(sql).run(params);
+function normalizeParams(params = {}) {
+  if (Array.isArray(params)) return params;
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key.startsWith("$") ? key : `$${key}`, value]),
+  );
 }
 
-export function tx(fn) {
-  return db.transaction(fn)();
+function normalizeSql(sql, params = {}) {
+  if (Array.isArray(params)) return sql;
+  return sql.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, "$$$1");
 }
 
-export function upsertNamed(table, name, extra = {}) {
-  const existing = one(`SELECT id FROM ${table} WHERE name = ?`, [name]);
+async function execute(sql, params = {}) {
+  return db.execute({
+    sql: normalizeSql(sql, params),
+    args: normalizeParams(params),
+  });
+}
+
+export async function initDb() {
+  const schema = fs.readFileSync(path.resolve("db/schema.sql"), "utf8");
+  const statements = schema
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  for (const statement of statements) {
+    await execute(statement);
+  }
+}
+
+export async function one(sql, params = {}) {
+  const result = await execute(sql, params);
+  return normalizeRows(result)[0];
+}
+
+export async function all(sql, params = {}) {
+  const result = await execute(sql, params);
+  return normalizeRows(result);
+}
+
+export async function run(sql, params = {}) {
+  const result = await execute(sql, params);
+  return {
+    changes: result.rowsAffected,
+    lastInsertRowid: result.lastInsertRowid ? Number(result.lastInsertRowid) : undefined,
+  };
+}
+
+export async function execStatements(statements) {
+  for (const statement of statements) {
+    await run(statement.sql, statement.args || {});
+  }
+}
+
+export async function upsertNamed(table, name, extra = {}) {
+  const existing = await one(`SELECT id FROM ${table} WHERE name = ?`, [name]);
   if (existing) {
     const keys = Object.keys(extra);
     if (keys.length) {
       const sets = keys.map((key) => `${key} = @${key}`).join(", ");
-      run(`UPDATE ${table} SET ${sets} WHERE id = @id`, { id: existing.id, ...extra });
+      await run(`UPDATE ${table} SET ${sets} WHERE id = @id`, { id: existing.id, ...extra });
     }
     return existing.id;
   }
   const fields = ["name", ...Object.keys(extra)];
   const values = fields.map((field) => `@${field}`).join(", ");
-  const info = run(
+  const info = await run(
     `INSERT INTO ${table} (${fields.join(", ")}) VALUES (${values})`,
     { name, ...extra },
   );
   return info.lastInsertRowid;
 }
+
+await initDb();
