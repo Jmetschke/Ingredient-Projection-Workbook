@@ -78,7 +78,9 @@ app.get("/api/summary", async (req, res) => {
 
 app.get("/api/weeks", async (req, res) => ok(res, await all("SELECT * FROM weeks ORDER BY week_start")));
 app.get("/api/products", async (req, res) => ok(res, await all("SELECT * FROM products ORDER BY name")));
-app.get("/api/ingredients", async (req, res) => ok(res, await all("SELECT * FROM ingredients ORDER BY name")));
+app.get("/api/ingredients", async (req, res) => {
+  ok(res, await all("SELECT * FROM ingredients ORDER BY is_master DESC, name"));
+});
 
 app.patch("/api/ingredients/:id", async (req, res) => {
   try {

@@ -178,6 +178,7 @@ async function renderInventory() {
   const ingredients = await api("/api/ingredients");
   const rows = filteredRows(ingredients, ["name", "purchase_uom"]);
   document.querySelector("#inventory-table").innerHTML = table([
+    { label: "Master", key: "is_master", value: (r) => Number(r.is_master) ? "Yes" : "" },
     { label: "Ingredient", key: "name" },
     { label: "UOM", key: "purchase_uom" },
     { label: "Unit Size", numeric: true, value: (r) => inputCell(r, "purchase_unit_size") },

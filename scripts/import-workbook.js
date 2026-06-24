@@ -1,6 +1,6 @@
 import path from "node:path";
 import XLSX from "xlsx";
-import { ensureMasterProducts, one, run, upsertNamed } from "../src/db.js";
+import { ensureMasterIngredients, ensureMasterProducts, one, run, upsertNamed } from "../src/db.js";
 import { regenerateRecommendations } from "../src/forecast.js";
 import { PRODUCT_ALIASES } from "../src/master-products.js";
 
@@ -382,6 +382,7 @@ export async function importWorkbook(filePath) {
   const wb = XLSX.readFile(resolved, { cellFormula: true, cellNF: true, cellDates: false });
   await clearImportedData();
   await ensureMasterProducts();
+  await ensureMasterIngredients();
   const info = await run("INSERT INTO imports (source_file, notes) VALUES (?, ?)", [
     resolved,
     `Imported sheets: ${wb.SheetNames.join(", ")}`,

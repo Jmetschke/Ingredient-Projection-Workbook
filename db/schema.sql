@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS products (
   category TEXT,
   source_sheet TEXT,
   source_row INTEGER,
+  is_master INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1
 );
 

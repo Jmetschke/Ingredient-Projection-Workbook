@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@libsql/client";
 import dotenv from "dotenv";
+import { MASTER_INGREDIENTS } from "./master-ingredients.js";
 import { MASTER_PRODUCTS } from "./master-products.js";
 
 dotenv.config();
@@ -51,6 +52,10 @@ export async function initDb() {
     .filter(Boolean);
   for (const statement of statements) {
     await execute(statement);
+  }
+  const ingredientColumns = await all("PRAGMA table_info(ingredients)");
+  if (!ingredientColumns.some((column) => column.name === "is_master")) {
+    await execute("ALTER TABLE ingredients ADD COLUMN is_master INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -116,4 +121,22 @@ export async function ensureMasterProducts() {
   }
 }
 
+export async function ensureMasterIngredients() {
+  for (const name of MASTER_INGREDIENTS) {
+    const existing = await one("SELECT id FROM ingredients WHERE name = ?", [name]);
+    if (existing) {
+      await run(
+        "UPDATE ingredients SET is_master = 1, source_sheet = COALESCE(source_sheet, 'Master Ingredient List'), active = 1 WHERE id = ?",
+        [existing.id],
+      );
+    } else {
+      await run(
+        "INSERT INTO ingredients (name, source_sheet, is_master, active) VALUES (?, 'Master Ingredient List', 1, 1)",
+        [name],
+      );
+    }
+  }
+}
+
 await ensureMasterProducts();
+await ensureMasterIngredients();
