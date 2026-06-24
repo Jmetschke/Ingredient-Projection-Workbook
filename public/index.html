@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Production Planning</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">Production Planning</div>
+      <nav id="tabs">
+        <button data-tab="dashboard" class="active">Dashboard</button>
+        <button data-tab="production">Production Planner</button>
+        <button data-tab="forecast">Ingredient Forecast</button>
+        <button data-tab="inventory">Inventory</button>
+        <button data-tab="formulas">Formula Manager</button>
+        <button data-tab="purchase">Purchase Calendar</button>
+        <button data-tab="receiving">Receiving</button>
+        <button data-tab="velocity">Velocity Planner</button>
+        <button data-tab="reports">Reports</button>
+        <button data-tab="import">Import / Export</button>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <h1 id="page-title">Dashboard</h1>
+          <p id="page-subtitle">Inventory warnings, upcoming production, and purchase timing.</p>
+        </div>
+        <div class="filters">
+          <input id="global-filter" type="search" placeholder="Filter rows">
+          <button id="refresh">Refresh</button>
+        </div>
+      </header>
+
+      <section id="dashboard" class="view active">
+        <div class="kpis" id="kpis"></div>
+        <div class="grid two">
+          <section>
+            <h2>Next Ingredients To Order</h2>
+            <div id="next-orders"></div>
+          </section>
+          <section>
+            <h2>Projected Shortages</h2>
+            <div id="shortages"></div>
+          </section>
+        </div>
+        <section>
+          <h2>Upcoming Production</h2>
+          <div id="upcoming-production"></div>
+        </section>
+      </section>
+
+      <section id="production" class="view">
+        <div class="section-head">
+          <h2>Weekly Production Quantities</h2>
+          <span>Editable inputs</span>
+        </div>
+        <div id="production-table"></div>
+      </section>
+
+      <section id="forecast" class="view">
+        <div class="section-head">
+          <h2>Ingredient Forecast</h2>
+          <span>Calculated output</span>
+        </div>
+        <select id="ingredient-filter"></select>
+        <div id="forecast-table"></div>
+      </section>
+
+      <section id="inventory" class="view">
+        <div class="section-head">
+          <h2>Inventory Settings</h2>
+          <span>Editable reorder inputs</span>
+        </div>
+        <div id="inventory-table"></div>
+      </section>
+
+      <section id="formulas" class="view">
+        <div class="section-head">
+          <h2>Product BOM</h2>
+          <span>Imported formula links and source tab lines</span>
+        </div>
+        <form id="formula-form" class="inline-form">
+          <select name="product_id" required></select>
+          <select name="ingredient_id" required></select>
+          <input name="quantity_per_unit" type="number" step="0.000001" placeholder="Qty per unit" required>
+          <input name="quantity_uom" placeholder="UOM">
+          <button>Add / Update</button>
+        </form>
+        <div id="formula-table"></div>
+        <h2>Formula Tab Source Lines</h2>
+        <div id="formula-lines"></div>
+      </section>
+
+      <section id="purchase" class="view">
+        <div class="grid two">
+          <section>
+            <h2>Recommended Orders</h2>
+            <div id="purchase-recommendations"></div>
+          </section>
+          <section>
+            <h2>Workbook Purchase Calendar</h2>
+            <div id="purchase-imported"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="receiving" class="view">
+        <div class="section-head">
+          <h2>Receive Inventory</h2>
+          <span>Editable movement</span>
+        </div>
+        <form id="receiving-form" class="inline-form">
+          <select name="ingredient_id" required></select>
+          <input name="date" type="date" required>
+          <input name="quantity_received" type="number" step="0.0001" placeholder="Quantity" required>
+          <input name="notes" placeholder="Notes">
+          <button>Record Receipt</button>
+        </form>
+      </section>
+
+      <section id="velocity" class="view">
+        <div class="section-head">
+          <h2>Velocity Planner</h2>
+          <span>Batch size and days/weeks of supply</span>
+        </div>
+        <div id="velocity-table"></div>
+      </section>
+
+      <section id="reports" class="view">
+        <div class="grid two">
+          <section>
+            <h2>Monthly Ingredient Cost</h2>
+            <div id="monthly-cost"></div>
+          </section>
+          <section>
+            <h2>Product Cost Summary</h2>
+            <div id="product-cost"></div>
+          </section>
+        </div>
+        <section>
+          <h2>Weekly Usage</h2>
+          <div id="weekly-usage"></div>
+        </section>
+      </section>
+
+      <section id="import" class="view">
+        <div class="grid two">
+          <section>
+            <h2>Import Workbook</h2>
+            <form id="path-import" class="stack-form">
+              <label>Server file path</label>
+              <input name="path" value="/Users/jhaskin/Downloads/Elevated Organics Production Planning Workbook v031225.xlsx">
+              <button>Import From Path</button>
+            </form>
+            <form id="upload-import" class="stack-form">
+              <label>Upload workbook</label>
+              <input name="workbook" type="file" accept=".xlsx,.xlsm,.xls">
+              <button>Upload And Import</button>
+            </form>
+            <pre id="import-result"></pre>
+          </section>
+          <section>
+            <h2>Export</h2>
+            <div class="export-buttons">
+              <a href="/api/export/ingredients">Ingredients XLSX</a>
+              <a href="/api/export/production">Production XLSX</a>
+              <a href="/api/export/forecast">Forecast XLSX</a>
+              <a href="/api/export/recommendations">Recommendations XLSX</a>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
