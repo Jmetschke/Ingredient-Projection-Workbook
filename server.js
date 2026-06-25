@@ -13,6 +13,7 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const INGREDIENT_TYPES = new Set(["SB", "Hijnx", "SB/Hijnx"]);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.resolve("public")));
@@ -22,7 +23,22 @@ function ok(res, data) {
 }
 
 function withBomUom(row) {
-  return row ? { ...row, bom_uom: bomUomForIngredient(row.name) } : row;
+  if (!row) return row;
+  const storedUom = String(row.purchase_uom || "").toLowerCase();
+  const bomUom = storedUom === "each" ? "each" : storedUom === "grams" ? "grams" : bomUomForIngredient(row.name);
+  return { ...row, bom_uom: bomUom, purchase_uom: bomUom, ingredient_type: normalizeIngredientType(row.ingredient_type) };
+}
+
+function normalizeIngredientUom(value, name = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "each") return "each";
+  if (raw === "gram" || raw === "grams") return "grams";
+  return bomUomForIngredient(name);
+}
+
+function normalizeIngredientType(value) {
+  const raw = String(value || "").trim();
+  return INGREDIENT_TYPES.has(raw) ? raw : "SB/Hijnx";
 }
 
 function fail(res, error, status = 500) {
@@ -361,8 +377,7 @@ app.get("/api/products", async (req, res) => {
 });
 app.get("/api/ingredients", async (req, res) => {
   const rows = await all(`
-    SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
-      reorder_threshold, lead_time_days, supplier_id, is_master, active
+    SELECT id, name, purchase_uom, ingredient_type, is_master, active
     FROM ingredients
     ORDER BY is_master DESC, name
   `);
@@ -375,17 +390,16 @@ app.post("/api/ingredients", async (req, res) => {
     if (!name) return fail(res, new Error("Item name is required"), 400);
     const existing = await one("SELECT * FROM ingredients WHERE lower(name) = lower(?)", [name]);
     if (existing) return fail(res, new Error("Inventory item already exists"), 400);
-    const purchaseUom = String(req.body.purchase_uom || "").trim() || null;
-    const purchaseUnitSize = Number(req.body.purchase_unit_size) || 0;
+    const purchaseUom = normalizeIngredientUom(req.body.purchase_uom, name);
+    const ingredientType = normalizeIngredientType(req.body.ingredient_type);
     const info = await run(
       `INSERT INTO ingredients
-        (name, purchase_uom, purchase_unit_size, is_master, active)
+        (name, purchase_uom, ingredient_type, is_master, active)
        VALUES (?, ?, ?, 1, 1)`,
-      [name, purchaseUom, purchaseUnitSize],
+      [name, purchaseUom, ingredientType],
     );
     ok(res, withBomUom(await one(`
-      SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
-        reorder_threshold, lead_time_days, supplier_id, is_master, active
+      SELECT id, name, purchase_uom, ingredient_type, is_master, active
       FROM ingredients
       WHERE id = ?
     `, [info.lastInsertRowid])));
@@ -495,12 +509,25 @@ app.get("/api/rl-scheduled-batches", async (req, res) => {
 
 app.patch("/api/ingredients/:id", async (req, res) => {
   try {
-    const allowed = ["purchase_uom", "purchase_unit_size", "cost_per_purchase_uom", "cost_per_unit", "reorder_threshold", "lead_time_days"];
-    const fields = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
+    const existing = await one("SELECT id, name FROM ingredients WHERE id = ?", [req.params.id]);
+    if (!existing) return fail(res, new Error("Inventory item not found"), 404);
+    const fields = {};
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name || "").trim();
+      if (!name) return fail(res, new Error("Item name is required"), 400);
+      const duplicate = await one("SELECT id FROM ingredients WHERE lower(name) = lower(?) AND id <> ?", [name, req.params.id]);
+      if (duplicate) return fail(res, new Error("Inventory item already exists"), 400);
+      fields.name = name;
+    }
+    if (req.body.purchase_uom !== undefined) {
+      fields.purchase_uom = normalizeIngredientUom(req.body.purchase_uom, fields.name || existing.name);
+    }
+    if (req.body.ingredient_type !== undefined) {
+      fields.ingredient_type = normalizeIngredientType(req.body.ingredient_type);
+    }
     if (!Object.keys(fields).length) {
       return ok(res, withBomUom(await one(`
-        SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
-          reorder_threshold, lead_time_days, supplier_id, is_master, active
+        SELECT id, name, purchase_uom, ingredient_type, is_master, active
         FROM ingredients
         WHERE id = ?
       `, [req.params.id])));
@@ -509,8 +536,7 @@ app.patch("/api/ingredients/:id", async (req, res) => {
     await run(`UPDATE ingredients SET ${sets} WHERE id = @id`, { ...fields, id: req.params.id });
     await regenerateRecommendations();
     ok(res, withBomUom(await one(`
-      SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
-        reorder_threshold, lead_time_days, supplier_id, is_master, active
+      SELECT id, name, purchase_uom, ingredient_type, is_master, active
       FROM ingredients
       WHERE id = ?
     `, [req.params.id])));
@@ -668,7 +694,7 @@ app.post("/api/formulas", async (req, res) => {
     if (!ingredient) return fail(res, new Error("Select a master ingredient"), 400);
     const quantityPerUnit = Number(quantity_per_unit) || 0;
     if (quantityPerUnit <= 0) return fail(res, new Error("BOM quantity per unit must be greater than zero"), 400);
-    const quantityUom = bomUomForIngredient(ingredient.name);
+    const quantityUom = normalizeIngredientUom(ingredient.purchase_uom, ingredient.name);
     const existing = await one(
       "SELECT id FROM product_formulas WHERE product_id = ? AND ingredient_id = ? AND source_sheet IS NULL LIMIT 1",
       [product_id, ingredient_id],
@@ -713,7 +739,7 @@ app.patch("/api/formulas/:id", async (req, res) => {
     if (duplicate) return fail(res, new Error("That ingredient is already on this BOM"), 400);
     const quantityPerUnit = Number(req.body.quantity_per_unit ?? existing.quantity_per_unit) || 0;
     if (quantityPerUnit <= 0) return fail(res, new Error("BOM quantity per unit must be greater than zero"), 400);
-    const quantityUom = bomUomForIngredient(ingredient.name);
+    const quantityUom = normalizeIngredientUom(ingredient.purchase_uom, ingredient.name);
     await run(
       "UPDATE product_formulas SET ingredient_id = ?, quantity_per_unit = ?, quantity_uom = ?, notes = ? WHERE id = ?",
       [ingredientId, quantityPerUnit, quantityUom, req.body.notes ?? existing.notes ?? null, req.params.id],

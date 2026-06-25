@@ -165,12 +165,19 @@
             <input name="name" placeholder="Ingredient or supply name" required>
           </label>
           <label class="form-field">
-            <span>Purchase UOM</span>
-            <input name="purchase_uom" placeholder="lb, kg, each">
+            <span>UOM</span>
+            <select name="purchase_uom" required>
+              <option value="grams">Gram</option>
+              <option value="each">Each</option>
+            </select>
           </label>
           <label class="form-field">
-            <span>Unit Size</span>
-            <input name="purchase_unit_size" type="number" step="0.0001" min="0" placeholder="0">
+            <span>Ingredient Type</span>
+            <select name="ingredient_type" required>
+              <option value="SB/Hijnx">SB/Hijnx</option>
+              <option value="SB">SB</option>
+              <option value="Hijnx">Hijnx</option>
+            </select>
           </label>
           <button>Add Item</button>
         </form>

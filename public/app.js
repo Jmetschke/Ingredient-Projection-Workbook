@@ -590,13 +590,54 @@ async function renderForecast() {
 
 async function renderInventory() {
   const ingredients = await api("/api/ingredients");
-  const rows = filteredRows(ingredients.filter((ingredient) => Number(ingredient.is_master)), ["name", "purchase_uom"]);
-  document.querySelector("#inventory-table").innerHTML = table([
-    { label: "Ingredient", key: "name" },
-    { label: "UOM", key: "purchase_uom" },
-    { label: "Unit Size", numeric: true, value: (r) => qty(r.purchase_unit_size) },
-    { label: "Active", value: (r) => Number(r.active) ? "Yes" : "" },
-  ], rows);
+  const rows = filteredRows(ingredients.filter((ingredient) => Number(ingredient.is_master)), ["name", "purchase_uom", "ingredient_type"]);
+  document.querySelector("#inventory-table").innerHTML = rows.length ? `
+    <div class="table-wrap editor-table-wrap">
+      <table class="editor-table inventory-table">
+        <thead><tr><th>Name</th><th>UOM</th><th>Ingredient Type</th><th>Actions</th></tr></thead>
+        <tbody>${rows.map((ingredient) => `
+          <tr data-ingredient-id="${ingredient.id}">
+            <td><input class="inventory-edit-name" aria-label="Ingredient name" value="${escapeHtml(ingredient.name)}"></td>
+            <td>
+              <select class="inventory-edit-uom" aria-label="UOM">
+                <option value="grams" ${ingredient.purchase_uom === "grams" ? "selected" : ""}>Gram</option>
+                <option value="each" ${ingredient.purchase_uom === "each" ? "selected" : ""}>Each</option>
+              </select>
+            </td>
+            <td>
+              <select class="inventory-edit-type" aria-label="Ingredient type">
+                ${optionList(["SB/Hijnx", "SB", "Hijnx"].map((type) => ({ id: type, name: type })), ingredient.ingredient_type || "SB/Hijnx")}
+              </select>
+            </td>
+            <td class="row-actions">
+              <button class="small secondary save-inventory" type="button">Save</button>
+            </td>
+          </tr>
+        `).join("")}</tbody>
+      </table>
+    </div>
+  ` : `<div class="empty-calendar">No inventory items found.</div>`;
+  document.querySelectorAll(".save-inventory").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      const message = document.querySelector("#inventory-message");
+      try {
+        const updated = await api(`/api/ingredients/${row.dataset.ingredientId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: row.querySelector(".inventory-edit-name").value,
+            purchase_uom: row.querySelector(".inventory-edit-uom").value,
+            ingredient_type: row.querySelector(".inventory-edit-type").value,
+          }),
+        });
+        message.textContent = `Saved ${updated.name}.`;
+        await loadReference();
+        await renderInventory();
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    });
+  });
 }
 
 async function renderFormulas() {

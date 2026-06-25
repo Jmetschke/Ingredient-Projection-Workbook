@@ -57,6 +57,9 @@ export async function initDb() {
   if (!ingredientColumns.some((column) => column.name === "is_master")) {
     await execute("ALTER TABLE ingredients ADD COLUMN is_master INTEGER NOT NULL DEFAULT 0");
   }
+  if (!ingredientColumns.some((column) => column.name === "ingredient_type")) {
+    await execute("ALTER TABLE ingredients ADD COLUMN ingredient_type TEXT NOT NULL DEFAULT 'SB/Hijnx'");
+  }
 }
 
 export async function one(sql, params = {}) {
@@ -126,13 +129,25 @@ export async function ensureMasterIngredients() {
     const existing = await one("SELECT id FROM ingredients WHERE name = ?", [name]);
     if (existing) {
       await run(
-        "UPDATE ingredients SET is_master = 1, active = 1 WHERE id = ?",
-        [existing.id],
+        `UPDATE ingredients
+         SET is_master = 1,
+             purchase_uom = CASE
+               WHEN lower(COALESCE(purchase_uom, '')) = 'each' THEN 'each'
+               WHEN lower(COALESCE(purchase_uom, '')) IN ('gram', 'grams') THEN 'grams'
+               ELSE ?
+             END,
+             ingredient_type = CASE
+               WHEN ingredient_type IN ('SB', 'Hijnx', 'SB/Hijnx') THEN ingredient_type
+               ELSE 'SB/Hijnx'
+             END,
+             active = 1
+         WHERE id = ?`,
+        [EACH_UOM_INGREDIENTS.has(name) ? "each" : "grams", existing.id],
       );
     } else {
       await run(
-        "INSERT INTO ingredients (name, is_master, active) VALUES (?, 1, 1)",
-        [name],
+        "INSERT INTO ingredients (name, purchase_uom, ingredient_type, is_master, active) VALUES (?, ?, 'SB/Hijnx', 1, 1)",
+        [name, EACH_UOM_INGREDIENTS.has(name) ? "each" : "grams"],
       );
     }
   }

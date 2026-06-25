@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS ingredients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   purchase_uom TEXT,
+  ingredient_type TEXT NOT NULL DEFAULT 'SB/Hijnx',
   purchase_unit_size REAL,
   cost_per_purchase_uom REAL,
   cost_per_unit REAL,
