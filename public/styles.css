@@ -651,9 +651,24 @@ tr.warning td {
   align-items: start;
 }
 
+.bom-batch-panel {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.bom-batch-panel h2 {
+  margin: 0;
+}
+
 .batch-list {
   display: grid;
   gap: 8px;
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  padding-right: 6px;
+  overscroll-behavior: contain;
 }
 
 .batch-list-item {
@@ -734,6 +749,14 @@ pre {
   .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .production-workspace, .bom-layout, .bom-form {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .bom-batch-panel {
+    position: static;
+  }
+
+  .batch-list {
+    max-height: 320px;
   }
 
   .kpis {
