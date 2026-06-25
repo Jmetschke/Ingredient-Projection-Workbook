@@ -5,6 +5,7 @@ import express from "express";
 import multer from "multer";
 import XLSX from "xlsx";
 import { all, one, run } from "./src/db.js";
+import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
 import { calculateForecast, regenerateRecommendations, weekIdForDate } from "./src/forecast.js";
 import { importWorkbook } from "./scripts/import-workbook.js";
 import { BATCH_TYPES } from "./src/master-products.js";
@@ -27,12 +28,130 @@ function fail(res, error, status = 500) {
   res.status(status).json({ ok: false, error: error.message || String(error) });
 }
 
+function quoteIdentifier(identifier) {
+  return `"${String(identifier).replace(/"/g, '""')}"`;
+}
+
+function findColumn(columns, candidates) {
+  const normalized = new Map(columns.map((column) => [column.toLowerCase(), column]));
+  for (const candidate of candidates) {
+    if (normalized.has(candidate)) return normalized.get(candidate);
+  }
+  for (const column of columns) {
+    const lower = column.toLowerCase();
+    if (candidates.some((candidate) => lower.includes(candidate))) return column;
+  }
+  return null;
+}
+
+function selectRlBatchSource(schema) {
+  const requested = process.env.TURSO_CALENDAR_TABLE;
+  const candidates = requested
+    ? schema.filter((table) => table.name === requested)
+    : schema.filter((table) => /batch|schedule|calendar|production/i.test(table.name));
+  const scored = candidates.map((table) => {
+    const columns = table.columns.map((column) => column.toLowerCase());
+    const score = [
+      columns.some((column) => /date|week|start/.test(column)),
+      columns.some((column) => /product|item|sku|name/.test(column)),
+      columns.some((column) => /qty|quantity|amount|units/.test(column)),
+    ].filter(Boolean).length;
+    return { table, score };
+  });
+  return scored.sort((a, b) => b.score - a.score)[0]?.table || null;
+}
+
+function normalizeRlBatch(row, source) {
+  const dateColumn = source.dateColumn;
+  const productColumn = source.productColumn;
+  const typeColumn = source.typeColumn;
+  const qtyColumn = source.qtyColumn;
+  const statusColumn = source.statusColumn;
+  const notesColumn = source.notesColumn;
+  return {
+    id: row.id ?? row.batch_id ?? row.uuid ?? null,
+    scheduled_date: dateColumn ? row[dateColumn] : null,
+    product_name: productColumn ? row[productColumn] : "",
+    batch_type: typeColumn ? row[typeColumn] : "",
+    quantity: qtyColumn ? row[qtyColumn] : null,
+    status: statusColumn ? row[statusColumn] : "",
+    notes: notesColumn ? row[notesColumn] : "",
+    raw: row,
+  };
+}
+
+function productionIngredientFilters(query) {
+  const where = ["pp.planned_qty > 0"];
+  const params = {};
+  if (query.batch_type && BATCH_TYPES.includes(query.batch_type)) {
+    where.push("p.category = @batchType");
+    params.batchType = query.batch_type;
+  }
+  if (query.start) {
+    where.push("w.week_start >= @start");
+    params.start = query.start;
+  }
+  if (query.end) {
+    where.push("w.week_start <= @end");
+    params.end = query.end;
+  }
+  return { where: where.join(" AND "), params };
+}
+
+async function productionIngredientReport(query = {}) {
+  const { where, params } = productionIngredientFilters(query);
+  const rows = await all(`
+    SELECT i.name AS ingredient_name,
+           'grams' AS quantity_uom,
+           SUM(pp.planned_qty * COALESCE(pf.quantity_per_unit, 0)) AS required_qty,
+           COUNT(DISTINCT p.id) AS product_count,
+           GROUP_CONCAT(DISTINCT p.name) AS products,
+           MIN(w.week_start) AS first_week,
+           MAX(w.week_start) AS last_week
+    FROM production_plan pp
+    JOIN weeks w ON w.id = pp.week_id
+    JOIN products p ON p.id = pp.product_id
+    JOIN product_formulas pf ON pf.product_id = pp.product_id
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE ${where}
+    GROUP BY i.id
+    ORDER BY i.name
+  `, params);
+  const detail = await all(`
+    SELECT w.week_start,
+           p.category AS batch_type,
+           p.name AS product_name,
+           pp.planned_qty,
+           i.name AS ingredient_name,
+           'grams' AS quantity_uom,
+           COALESCE(pf.quantity_per_unit, 0) AS quantity_per_unit,
+           pp.planned_qty * COALESCE(pf.quantity_per_unit, 0) AS required_qty
+    FROM production_plan pp
+    JOIN weeks w ON w.id = pp.week_id
+    JOIN products p ON p.id = pp.product_id
+    JOIN product_formulas pf ON pf.product_id = pp.product_id
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE ${where}
+    ORDER BY w.week_start, p.category, p.name, i.name
+  `, params);
+  return {
+    filters: {
+      batch_type: query.batch_type || "",
+      start: query.start || "",
+      end: query.end || "",
+    },
+    rows,
+    detail,
+  };
+}
+
 app.get("/api/health", async (req, res) => {
   try {
     const check = await one("SELECT 1 AS ok");
     ok(res, {
       database: check?.ok === 1 ? "connected" : "unknown",
       turso: Boolean(process.env.TURSO_DATABASE_URL),
+      calendarTurso: calendarDbConfigured,
     });
   } catch (error) {
     fail(res, error);
@@ -82,6 +201,77 @@ app.get("/api/ingredients", async (req, res) => {
   ok(res, await all("SELECT * FROM ingredients ORDER BY is_master DESC, name"));
 });
 
+app.post("/api/ingredients", async (req, res) => {
+  try {
+    const name = String(req.body.name || "").trim();
+    if (!name) return fail(res, new Error("Item name is required"), 400);
+    const existing = await one("SELECT * FROM ingredients WHERE lower(name) = lower(?)", [name]);
+    if (existing) return fail(res, new Error("Inventory item already exists"), 400);
+    const purchaseUom = String(req.body.purchase_uom || "").trim() || null;
+    const purchaseUnitSize = Number(req.body.purchase_unit_size) || 0;
+    const info = await run(
+      `INSERT INTO ingredients
+        (name, purchase_uom, purchase_unit_size, source_sheet, is_master, active)
+       VALUES (?, ?, ?, 'Master Ingredient List', 1, 1)`,
+      [name, purchaseUom, purchaseUnitSize],
+    );
+    ok(res, await one("SELECT * FROM ingredients WHERE id = ?", [info.lastInsertRowid]));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.get("/api/rl-scheduled-batches", async (req, res) => {
+  try {
+    if (!calendarDbConfigured) {
+      return ok(res, {
+        configured: false,
+        source: null,
+        schema: [],
+        batches: [],
+        message: "TURSO_CALENDAR_URL and TURSO_CALENDAR_TOKEN are not configured.",
+      });
+    }
+    const schema = await calendarSchema();
+    const table = selectRlBatchSource(schema);
+    if (!table) {
+      return ok(res, {
+        configured: true,
+        source: null,
+        schema,
+        batches: [],
+        message: "No likely scheduled batch table was found in the RL calendar database.",
+      });
+    }
+    const dateColumn = findColumn(table.columns, ["scheduled_date", "production_date", "date", "week_start", "start_date", "batch_date"]);
+    const productColumn = findColumn(table.columns, ["product_name", "product", "item_name", "item", "sku", "name"]);
+    const typeColumn = findColumn(table.columns, ["batch_type", "type", "category"]);
+    const qtyColumn = findColumn(table.columns, ["quantity", "qty", "batch_qty", "amount", "units"]);
+    const statusColumn = findColumn(table.columns, ["status", "state"]);
+    const notesColumn = findColumn(table.columns, ["notes", "note", "description"]);
+    if (!dateColumn || !productColumn) {
+      return ok(res, {
+        configured: true,
+        source: { table: table.name, dateColumn, productColumn, typeColumn, qtyColumn, statusColumn, notesColumn },
+        schema,
+        batches: [],
+        message: "The RL calendar table was found, but date and product columns could not both be identified.",
+      });
+    }
+    const orderColumn = quoteIdentifier(dateColumn);
+    const rows = await calendarAll(`SELECT * FROM ${quoteIdentifier(table.name)} ORDER BY ${orderColumn}`);
+    const source = { table: table.name, dateColumn, productColumn, typeColumn, qtyColumn, statusColumn, notesColumn };
+    ok(res, {
+      configured: true,
+      source,
+      schema,
+      batches: rows.map((row) => normalizeRlBatch(row, source)),
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
 app.patch("/api/ingredients/:id", async (req, res) => {
   try {
     const allowed = ["purchase_uom", "purchase_unit_size", "cost_per_purchase_uom", "cost_per_unit", "reorder_threshold", "lead_time_days"];
@@ -118,6 +308,13 @@ app.get("/api/production-plan", async (req, res) => {
         ORDER BY p.name, w.week_start
       `),
       batches: await all(`
+        SELECT pb.*, p.name AS product_name, w.week_start
+        FROM production_batches pb
+        JOIN products p ON p.id = pb.product_id
+        JOIN weeks w ON w.id = pb.week_id
+        ORDER BY w.week_start, pb.batch_type, p.name, pb.id
+      `),
+      recentBatches: await all(`
         SELECT pb.*, p.name AS product_name, w.week_start
         FROM production_batches pb
         JOIN products p ON p.id = pb.product_id
@@ -193,18 +390,19 @@ app.get("/api/forecast", async (req, res) => {
 app.get("/api/formulas", async (req, res) => {
   try {
     ok(res, {
+      products: await all(`
+        SELECT *
+        FROM products
+        WHERE active = 1 AND category IN ('Hijnx', 'Snackbar')
+        ORDER BY category, name
+      `),
       formulas: await all(`
         SELECT pf.*, p.name AS product_name, i.name AS ingredient_name
         FROM product_formulas pf
         JOIN products p ON p.id = pf.product_id
         JOIN ingredients i ON i.id = pf.ingredient_id
+        WHERE p.category IN ('Hijnx', 'Snackbar')
         ORDER BY p.name, i.name
-      `),
-      sourceLines: await all(`
-        SELECT ftl.*, p.name AS product_name
-        FROM formula_tab_lines ftl
-        LEFT JOIN products p ON p.id = ftl.product_id
-        ORDER BY ftl.sheet_name, ftl.row_number
       `),
     });
   } catch (error) {
@@ -214,22 +412,30 @@ app.get("/api/formulas", async (req, res) => {
 
 app.post("/api/formulas", async (req, res) => {
   try {
-    const { product_id, ingredient_id, quantity_per_unit, quantity_uom, notes } = req.body;
+    const { product_id, ingredient_id, quantity_per_unit, notes } = req.body;
+    const product = await one("SELECT * FROM products WHERE id = ?", [product_id]);
+    if (!product || !BATCH_TYPES.includes(product.category)) {
+      return fail(res, new Error("Select a valid production batch"), 400);
+    }
+    const ingredient = await one("SELECT * FROM ingredients WHERE id = ? AND is_master = 1", [ingredient_id]);
+    if (!ingredient) return fail(res, new Error("Select a master ingredient"), 400);
+    const gramsPerUnit = Number(quantity_per_unit) || 0;
+    if (gramsPerUnit <= 0) return fail(res, new Error("Grams per unit must be greater than zero"), 400);
     const existing = await one(
-      "SELECT id FROM product_formulas WHERE product_id = ? AND ingredient_id = ? AND source_sheet IS NULL LIMIT 1",
+      "SELECT id FROM product_formulas WHERE product_id = ? AND ingredient_id = ? ORDER BY source_sheet IS NULL DESC, id LIMIT 1",
       [product_id, ingredient_id],
     );
     if (existing) {
       await run(
         "UPDATE product_formulas SET quantity_per_unit = ?, quantity_uom = ?, notes = ? WHERE id = ?",
-        [Number(quantity_per_unit) || 0, quantity_uom || null, notes || null, existing.id],
+        [gramsPerUnit, "grams", notes || null, existing.id],
       );
     } else {
       await run(
         `INSERT INTO product_formulas
           (product_id, ingredient_id, quantity_per_unit, quantity_uom, notes)
          VALUES (?, ?, ?, ?, ?)`,
-        [product_id, ingredient_id, Number(quantity_per_unit) || 0, quantity_uom || null, notes || null],
+        [product_id, ingredient_id, gramsPerUnit, "grams", notes || null],
       );
     }
     await regenerateRecommendations();
@@ -332,6 +538,14 @@ app.get("/api/reports", async (req, res) => {
   }
 });
 
+app.get("/api/production-ingredient-report", async (req, res) => {
+  try {
+    ok(res, await productionIngredientReport(req.query));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
 app.post("/api/import/path", async (req, res) => {
   try {
     ok(res, await importWorkbook(req.body.path));
@@ -344,6 +558,43 @@ app.post("/api/import/upload", upload.single("workbook"), async (req, res) => {
   try {
     if (!req.file) return fail(res, new Error("No workbook uploaded"), 400);
     ok(res, await importWorkbook(req.file.path));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.get("/api/export/production-ingredients", async (req, res) => {
+  try {
+    const report = await productionIngredientReport(req.query);
+    const summary = report.rows.map((row) => ({
+      Ingredient: row.ingredient_name,
+      "Needed Qty": row.required_qty,
+      UOM: row.quantity_uom,
+      Products: row.products,
+      "First Week": row.first_week,
+      "Last Week": row.last_week,
+    }));
+    const detail = report.detail.map((row) => ({
+      Week: row.week_start,
+      "Batch Type": row.batch_type,
+      Product: row.product_name,
+      "Planned Qty": row.planned_qty,
+      Ingredient: row.ingredient_name,
+      "Qty Per Unit": row.quantity_per_unit,
+      "Needed Qty": row.required_qty,
+      UOM: row.quantity_uom,
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), "Ingredient Needs");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detail), "Production Detail");
+    const outDir = path.resolve("exports");
+    fs.mkdirSync(outDir, { recursive: true });
+    const cleanType = report.filters.batch_type || "both";
+    const cleanStart = report.filters.start || "all";
+    const cleanEnd = report.filters.end || "all";
+    const file = path.join(outDir, `production-ingredients-${cleanType}-${cleanStart}-${cleanEnd}-${Date.now()}.xlsx`);
+    XLSX.writeFile(wb, file);
+    res.download(file);
   } catch (error) {
     fail(res, error);
   }

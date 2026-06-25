@@ -3,16 +3,24 @@ const state = {
   ingredients: [],
   weeks: [],
   filter: "",
+  productionCalendarMonths: 6,
+  productionBatchType: "",
+  productionStartWeek: "",
+  productionEndWeek: "",
+  rlCalendarMonths: 6,
+  selectedFormulaProductId: "",
 };
+
+const PAY_PERIOD_ANCHOR_2026 = new Date(2026, 0, 3);
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const titles = {
   dashboard: ["Dashboard", "Inventory warnings, upcoming production, and purchase timing."],
   production: ["Production Planner", "Editable weekly planned production by SKU."],
+  "rl-scheduled-batches": ["RL Scheduled Batches", "Read-only calendar from the RL scheduling database."],
   forecast: ["Ingredient Forecast", "Projected usage, receipts, ending inventory, and shortages."],
-  inventory: ["Inventory", "Current ingredient setup, cost, lead time, and reorder settings."],
-  formulas: ["Formula Manager", "Product-to-ingredient BOM and formula-tab source lines."],
-  reports: ["Reports", "Weekly usage, monthly ingredient cost, and product cost summary."],
-  import: ["Import / Export", "Load workbook data into the database and export app tables."],
+  inventory: ["Inventory", "Add new items to the master inventory list."],
+  formulas: ["Formula Manager", "Batch-level BOM setup using grams."],
 };
 
 async function api(path, options = {}) {
@@ -44,6 +52,55 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function parseIsoDate(value) {
+  const [year, month, day] = String(value || "").slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function isoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addMonths(date, months) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function saturdayForWeek(weekStart) {
+  const date = parseIsoDate(weekStart);
+  if (!date) return null;
+  const daysSinceSaturday = (date.getDay() + 1) % 7;
+  return addDays(date, -daysSinceSaturday);
+}
+
+function weekMeta(week) {
+  const blockStart = saturdayForWeek(week.week_start);
+  const blockEnd = addDays(blockStart, 8);
+  const weeksFromAnchor = Math.floor((blockStart - PAY_PERIOD_ANCHOR_2026) / (7 * MS_PER_DAY));
+  const weekNumber = Math.max(1, weeksFromAnchor + 1);
+  const payPeriod = Math.max(1, Math.floor(weeksFromAnchor / 2) + 1);
+  const formatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+  const yearFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return {
+    ...week,
+    blockStart,
+    blockEnd,
+    monthKey: `${blockStart.getFullYear()}-${String(blockStart.getMonth() + 1).padStart(2, "0")}`,
+    monthLabel: new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(blockStart),
+    weekNumber,
+    payPeriod,
+    label: `Week ${weekNumber} (${formatter.format(blockStart)} - ${yearFormatter.format(blockEnd)})`,
+  };
+}
+
 function filteredRows(rows, fields) {
   if (!state.filter) return rows;
   const needle = state.filter.toLowerCase();
@@ -73,11 +130,12 @@ async function loadReference() {
 
 function fillSelects() {
   const productOptions = state.products.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
-  const ingredientOptions = state.ingredients.map((i) => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+  const masterIngredients = state.ingredients.filter((ingredient) => Number(ingredient.is_master));
+  const ingredientOptions = masterIngredients.map((i) => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
   document.querySelectorAll("select[name='product_id']").forEach((el) => { el.innerHTML = productOptions; });
   document.querySelectorAll("select[name='ingredient_id']").forEach((el) => { el.innerHTML = ingredientOptions; });
   const filter = document.querySelector("#ingredient-filter");
-  filter.innerHTML = `<option value="">All ingredients</option>${ingredientOptions}`;
+  filter.innerHTML = `<option value="">All ingredients</option>${state.ingredients.map((i) => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("")}`;
 }
 
 async function renderDashboard() {
@@ -106,14 +164,55 @@ async function renderDashboard() {
 async function renderProduction() {
   const data = await api("/api/production-plan");
   const plan = new Map(data.plan.map((p) => [`${p.product_id}:${p.week_id}`, p]));
-  const rows = filteredRows(data.products, ["name"]);
   const batchForm = document.querySelector("#production-batch-form");
   const batchTypeSelect = batchForm.querySelector("select[name='batch_type']");
   const productSelect = batchForm.querySelector("select[name='product_id']");
   const weekSelect = batchForm.querySelector("select[name='week_id']");
+  const calendarMonthsSelect = document.querySelector("#production-calendar-months");
+  const reportBatchTypeSelect = document.querySelector("#production-filter-batch-type");
+  const reportStartSelect = document.querySelector("#production-filter-start");
+  const reportEndSelect = document.querySelector("#production-filter-end");
+  const weeks = data.weeks.map(weekMeta);
+  const defaultWeeks = visibleCalendarWeeks(weeks, state.productionCalendarMonths);
+  if (!state.productionStartWeek) state.productionStartWeek = defaultWeeks[0]?.week_start || weeks[0]?.week_start || "";
+  if (!state.productionEndWeek) state.productionEndWeek = defaultWeeks.at(-1)?.week_start || weeks.at(-1)?.week_start || "";
+  const filteredWeeks = weeks.filter((week) => (!state.productionStartWeek || week.week_start >= state.productionStartWeek)
+    && (!state.productionEndWeek || week.week_start <= state.productionEndWeek));
+  const products = data.products.filter((product) => !state.productionBatchType || product.category === state.productionBatchType);
+  const rows = filteredRows(products, ["name"]);
+  const filteredBatches = data.batches.filter((batch) => (!state.productionBatchType || batch.batch_type === state.productionBatchType)
+    && (!state.productionStartWeek || batch.week_start >= state.productionStartWeek)
+    && (!state.productionEndWeek || batch.week_start <= state.productionEndWeek));
+  const ingredientReport = await api(`/api/production-ingredient-report${productionReportQuery()}`);
 
   batchTypeSelect.innerHTML = data.batchTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
-  weekSelect.innerHTML = data.weeks.map((week) => `<option value="${week.id}">${week.week_start}</option>`).join("");
+  weekSelect.innerHTML = weeks.map((week) => `<option value="${week.id}">${escapeHtml(week.label)}</option>`).join("");
+  calendarMonthsSelect.value = String(state.productionCalendarMonths);
+  calendarMonthsSelect.onchange = async () => {
+    state.productionCalendarMonths = Number(calendarMonthsSelect.value) || 6;
+    const nextDefaultWeeks = visibleCalendarWeeks(weeks, state.productionCalendarMonths);
+    state.productionStartWeek = nextDefaultWeeks[0]?.week_start || state.productionStartWeek;
+    state.productionEndWeek = nextDefaultWeeks.at(-1)?.week_start || state.productionEndWeek;
+    await renderProduction();
+  };
+  reportBatchTypeSelect.value = state.productionBatchType;
+  reportStartSelect.innerHTML = weeks.map((week) => `<option value="${week.week_start}">${escapeHtml(week.label)}</option>`).join("");
+  reportEndSelect.innerHTML = reportStartSelect.innerHTML;
+  reportStartSelect.value = state.productionStartWeek;
+  reportEndSelect.value = state.productionEndWeek;
+  reportBatchTypeSelect.onchange = async () => {
+    state.productionBatchType = reportBatchTypeSelect.value;
+    await renderProduction();
+  };
+  reportStartSelect.onchange = async () => {
+    state.productionStartWeek = reportStartSelect.value;
+    await renderProduction();
+  };
+  reportEndSelect.onchange = async () => {
+    state.productionEndWeek = reportEndSelect.value;
+    await renderProduction();
+  };
+  document.querySelector("#production-ingredient-export").href = `/api/export/production-ingredients${productionReportQuery()}`;
 
   function fillProductionProducts() {
     const selectedType = batchTypeSelect.value || data.batchTypes[0];
@@ -136,8 +235,16 @@ async function renderProduction() {
     await renderProduction();
   };
 
-  const html = `<div class="table-wrap"><table><thead><tr><th>Batch Type</th><th>Product</th>${data.weeks.map((w) => `<th class="numeric">${w.week_start}</th>`).join("")}</tr></thead><tbody>${
-    rows.map((product) => `<tr><td>${escapeHtml(product.category || "")}</td><td>${escapeHtml(product.name)}</td>${data.weeks.map((week) => {
+  renderProductionCalendar(filteredBatches, filteredWeeks);
+  document.querySelector("#production-ingredient-report").innerHTML = table([
+    { label: "Ingredient", key: "ingredient_name" },
+    { label: "Needed Qty", numeric: true, value: (r) => qty(r.required_qty) },
+    { label: "UOM", key: "quantity_uom" },
+    { label: "Products", numeric: true, key: "product_count" },
+  ], filteredRows(ingredientReport.rows || [], ["ingredient_name", "quantity_uom"]));
+
+  const html = `<div class="table-wrap"><table><thead><tr><th>Batch Type</th><th>Product</th>${filteredWeeks.map((w) => `<th class="numeric">W${w.weekNumber}<br>${w.week_start}</th>`).join("")}</tr></thead><tbody>${
+    rows.map((product) => `<tr><td>${escapeHtml(product.category || "")}</td><td>${escapeHtml(product.name)}</td>${filteredWeeks.map((week) => {
       const entry = plan.get(`${product.id}:${week.id}`);
       return `<td class="numeric"><input class="editable plan-input" data-product="${product.id}" data-week="${week.id}" type="number" step="1" value="${entry?.planned_qty || 0}"></td>`;
     }).join("")}</tr>`).join("")
@@ -149,7 +256,9 @@ async function renderProduction() {
     { label: "Batch Type", key: "batch_type" },
     { label: "Product", key: "product_name" },
     { label: "Quantity", numeric: true, value: (r) => qty(r.quantity) },
-  ], filteredRows(data.batches, ["week_start", "batch_type", "product_name"]));
+  ], filteredRows((data.recentBatches || data.batches).filter((batch) => (!state.productionBatchType || batch.batch_type === state.productionBatchType)
+    && (!state.productionStartWeek || batch.week_start >= state.productionStartWeek)
+    && (!state.productionEndWeek || batch.week_start <= state.productionEndWeek)), ["week_start", "batch_type", "product_name"]));
   document.querySelectorAll(".plan-input").forEach((input) => {
     input.addEventListener("change", async () => {
       await api("/api/production-plan", {
@@ -158,6 +267,139 @@ async function renderProduction() {
       });
     });
   });
+}
+
+function productionReportQuery() {
+  const params = new URLSearchParams();
+  if (state.productionBatchType) params.set("batch_type", state.productionBatchType);
+  if (state.productionStartWeek) params.set("start", state.productionStartWeek);
+  if (state.productionEndWeek) params.set("end", state.productionEndWeek);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function visibleCalendarWeeks(weeks, monthCount) {
+  const today = new Date();
+  const firstVisible = saturdayForWeek(isoDate(today));
+  const lastVisible = addMonths(firstVisible, monthCount);
+  return weeks.filter((week) => week.blockEnd >= firstVisible && week.blockStart < lastVisible);
+}
+
+function renderProductionCalendar(batches, weeks) {
+  const batchesByWeek = new Map();
+  batches.forEach((batch) => {
+    const key = String(batch.week_id);
+    if (!batchesByWeek.has(key)) batchesByWeek.set(key, []);
+    batchesByWeek.get(key).push(batch);
+  });
+  const monthGroups = weeks.reduce((groups, week) => {
+    if (!groups.has(week.monthKey)) groups.set(week.monthKey, { label: week.monthLabel, weeks: [] });
+    groups.get(week.monthKey).weeks.push(week);
+    return groups;
+  }, new Map());
+  const html = Array.from(monthGroups.values()).map((group) => `
+    <div class="calendar-month">
+      <h3>${escapeHtml(group.label)}</h3>
+      <div class="week-grid">
+        ${group.weeks.map((week) => {
+          const scheduled = batchesByWeek.get(String(week.id)) || [];
+          return `
+            <article class="week-card">
+              <div class="week-card-head">
+                <strong>Week ${week.weekNumber}</strong>
+                <span>PP ${week.payPeriod}</span>
+              </div>
+              <div class="week-range">${escapeHtml(week.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</div>
+              <div class="week-batches">
+                ${scheduled.length ? scheduled.map((batch) => `
+                  <div class="batch-chip">
+                    <span>${escapeHtml(batch.batch_type)}</span>
+                    <strong>${escapeHtml(batch.product_name)}</strong>
+                    <em>${qty(batch.quantity)}</em>
+                  </div>
+                `).join("") : `<span class="empty-week">No batches</span>`}
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `).join("");
+  document.querySelector("#production-calendar").innerHTML = html || `<div class="empty-calendar">No weeks found for this calendar window.</div>`;
+}
+
+async function renderRlScheduledBatches() {
+  const data = await api("/api/rl-scheduled-batches");
+  const monthsSelect = document.querySelector("#rl-calendar-months");
+  monthsSelect.value = String(state.rlCalendarMonths);
+  monthsSelect.onchange = async () => {
+    state.rlCalendarMonths = Number(monthsSelect.value) || 6;
+    await renderRlScheduledBatches();
+  };
+
+  document.querySelector("#rl-calendar-status").textContent = data.source
+    ? `Read only source: ${data.source.table}`
+    : (data.message || "Read only source is not available.");
+
+  const weeks = state.weeks.map(weekMeta);
+  const visibleWeeks = visibleCalendarWeeks(weeks, state.rlCalendarMonths);
+  const batchesByBlock = new Map();
+  (data.batches || []).forEach((batch) => {
+    const blockStart = saturdayForWeek(batch.scheduled_date);
+    if (!blockStart) return;
+    const key = isoDate(blockStart);
+    if (!batchesByBlock.has(key)) batchesByBlock.set(key, []);
+    batchesByBlock.get(key).push(batch);
+  });
+  const monthGroups = visibleWeeks.reduce((groups, week) => {
+    if (!groups.has(week.monthKey)) groups.set(week.monthKey, { label: week.monthLabel, weeks: [] });
+    groups.get(week.monthKey).weeks.push(week);
+    return groups;
+  }, new Map());
+  const calendarHtml = Array.from(monthGroups.values()).map((group) => `
+    <div class="calendar-month">
+      <h3>${escapeHtml(group.label)}</h3>
+      <div class="week-grid">
+        ${group.weeks.map((week) => {
+          const scheduled = batchesByBlock.get(isoDate(week.blockStart)) || [];
+          return `
+            <article class="week-card read-only">
+              <div class="week-card-head">
+                <strong>Week ${week.weekNumber}</strong>
+                <span>PP ${week.payPeriod}</span>
+              </div>
+              <div class="week-range">${escapeHtml(week.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</div>
+              <div class="week-batches">
+                ${scheduled.length ? scheduled.map((batch) => `
+                  <div class="batch-chip">
+                    <span>${escapeHtml([batch.batch_type, batch.status].filter(Boolean).join(" - "))}</span>
+                    <strong>${escapeHtml(batch.product_name || "Scheduled batch")}</strong>
+                    <em>${batch.quantity == null ? "" : qty(batch.quantity)}</em>
+                  </div>
+                `).join("") : `<span class="empty-week">No batches</span>`}
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `).join("");
+  document.querySelector("#rl-scheduled-calendar").innerHTML = calendarHtml || `<div class="empty-calendar">No weeks found for this calendar window.</div>`;
+
+  if (data.message && data.schema?.length) {
+    document.querySelector("#rl-scheduled-table").innerHTML = table([
+      { label: "Table / View", key: "name" },
+      { label: "Columns", value: (row) => escapeHtml(row.columns.join(", ")) },
+    ], data.schema);
+  } else {
+    document.querySelector("#rl-scheduled-table").innerHTML = table([
+      { label: "Scheduled Date", key: "scheduled_date" },
+      { label: "Batch Type", key: "batch_type" },
+      { label: "Product", key: "product_name" },
+      { label: "Quantity", numeric: true, value: (row) => row.quantity == null ? "" : qty(row.quantity) },
+      { label: "Status", key: "status" },
+    ], filteredRows(data.batches || [], ["scheduled_date", "batch_type", "product_name", "status"]));
+  }
 }
 
 async function renderForecast() {
@@ -176,76 +418,59 @@ async function renderForecast() {
 
 async function renderInventory() {
   const ingredients = await api("/api/ingredients");
-  const rows = filteredRows(ingredients, ["name", "purchase_uom"]);
+  const rows = filteredRows(ingredients.filter((ingredient) => Number(ingredient.is_master)), ["name", "purchase_uom"]);
   document.querySelector("#inventory-table").innerHTML = table([
-    { label: "Master", key: "is_master", value: (r) => Number(r.is_master) ? "Yes" : "" },
     { label: "Ingredient", key: "name" },
     { label: "UOM", key: "purchase_uom" },
-    { label: "Unit Size", numeric: true, value: (r) => inputCell(r, "purchase_unit_size") },
-    { label: "Cost/Unit", numeric: true, value: (r) => inputCell(r, "cost_per_unit", "0.000001") },
-    { label: "Lead Days", numeric: true, value: (r) => inputCell(r, "lead_time_days", "1") },
-    { label: "Reorder Threshold", numeric: true, value: (r) => inputCell(r, "reorder_threshold") },
+    { label: "Unit Size", numeric: true, value: (r) => qty(r.purchase_unit_size) },
+    { label: "Active", value: (r) => Number(r.active) ? "Yes" : "" },
   ], rows);
-  document.querySelectorAll(".ingredient-input").forEach((input) => {
-    input.addEventListener("change", async () => {
-      await api(`/api/ingredients/${input.dataset.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ [input.dataset.field]: Number(input.value) || 0 }),
-      });
-    });
-  });
-}
-
-function inputCell(row, field, step = "0.0001") {
-  return `<input class="editable ingredient-input" data-id="${row.id}" data-field="${field}" type="number" step="${step}" value="${row[field] ?? 0}">`;
 }
 
 async function renderFormulas() {
   const data = await api("/api/formulas");
-  document.querySelector("#formula-table").innerHTML = table([
-    { label: "Product", key: "product_name" },
-    { label: "Ingredient", key: "ingredient_name" },
-    { label: "Qty / Unit", numeric: true, value: (r) => qty(r.quantity_per_unit) },
-    { label: "UOM", key: "quantity_uom" },
-    { label: "Source", value: (r) => escapeHtml([r.source_sheet, r.source_cell].filter(Boolean).join(" ")) },
-  ], filteredRows(data.formulas, ["product_name", "ingredient_name", "source_sheet"]));
-  document.querySelector("#formula-lines").innerHTML = table([
-    { label: "Sheet", key: "sheet_name" },
-    { label: "Row", key: "row_number", numeric: true },
-    { label: "Product", key: "product_name" },
-    { label: "Ingredient", key: "ingredient_name" },
-    { label: "Formula Qty", numeric: true, value: (r) => qty(r.formula_qty) },
-    { label: "Batch Qty", numeric: true, value: (r) => qty(r.batch_qty) },
-  ], filteredRows(data.sourceLines, ["sheet_name", "product_name", "ingredient_name"]));
-}
+  const batches = data.products;
+  if (!state.selectedFormulaProductId && batches.length) {
+    state.selectedFormulaProductId = String(batches[0].id);
+  }
+  const selectedProduct = batches.find((product) => String(product.id) === String(state.selectedFormulaProductId));
+  document.querySelector("#formula-batch-list").innerHTML = batches.map((product) => {
+    const count = data.formulas.filter((formula) => String(formula.product_id) === String(product.id)).length;
+    const active = String(product.id) === String(state.selectedFormulaProductId) ? "active" : "";
+    return `
+      <button class="batch-list-item ${active}" data-product="${product.id}">
+        <strong>${escapeHtml(product.name)}</strong>
+        <span>${escapeHtml(product.category || "")} · ${count} ingredients</span>
+      </button>
+    `;
+  }).join("") || `<div class="empty-calendar">No production batches found.</div>`;
+  document.querySelectorAll(".batch-list-item").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedFormulaProductId = button.dataset.product;
+      await renderFormulas();
+    });
+  });
 
-async function renderReports() {
-  const data = await api("/api/reports");
-  document.querySelector("#monthly-cost").innerHTML = table([
-    { label: "Month", key: "month" },
-    { label: "Projected Cost", numeric: true, value: (r) => money(r.projected_cost) },
-  ], data.monthlyCost);
-  document.querySelector("#product-cost").innerHTML = table([
-    { label: "Product", key: "product_name" },
-    { label: "Cost / Unit", numeric: true, value: (r) => money(r.ingredient_cost_per_unit) },
-    { label: "Ingredients", numeric: true, key: "ingredient_count" },
-  ], filteredRows(data.productCost, ["product_name"]));
-  document.querySelector("#weekly-usage").innerHTML = table([
-    { label: "Week", key: "week_start" },
+  const form = document.querySelector("#formula-form");
+  form.querySelector("input[name='product_id']").value = selectedProduct?.id || "";
+  document.querySelector("#formula-focus-title").textContent = selectedProduct ? selectedProduct.name : "Select a batch";
+  document.querySelector("#formula-focus-meta").textContent = selectedProduct ? `${selectedProduct.category || ""} BOM in grams` : "";
+
+  const selectedFormulas = data.formulas.filter((formula) => String(formula.product_id) === String(state.selectedFormulaProductId));
+  document.querySelector("#formula-table").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
-    { label: "Usage", numeric: true, value: (r) => qty(r.required_usage) },
-    { label: "Cost", numeric: true, value: (r) => money(r.projected_cost) },
-  ], filteredRows(data.weeklyUsage, ["week_start", "ingredient_name"]));
+    { label: "Grams / Unit", numeric: true, value: (r) => qty(r.quantity_per_unit) },
+    { label: "UOM", value: () => "grams" },
+  ], filteredRows(selectedFormulas, ["ingredient_name"]));
 }
 
 const renderers = {
   dashboard: renderDashboard,
   production: renderProduction,
+  "rl-scheduled-batches": renderRlScheduledBatches,
   forecast: renderForecast,
   inventory: renderInventory,
   formulas: renderFormulas,
-  reports: renderReports,
-  import: async () => {},
 };
 
 async function activate(tab) {
@@ -272,29 +497,35 @@ document.querySelector("#global-filter").addEventListener("input", async (event)
 
 document.querySelector("#ingredient-filter").addEventListener("change", renderForecast);
 
+document.querySelector("#inventory-item-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const message = document.querySelector("#inventory-message");
+  try {
+    const created = await api("/api/ingredients", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+    });
+    form.reset();
+    message.textContent = `Added ${created.name} to the master inventory list.`;
+    await loadReference();
+    await renderInventory();
+  } catch (error) {
+    message.textContent = error.message;
+  }
+});
+
 document.querySelector("#formula-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
+  const formEl = event.currentTarget;
+  const form = new FormData(formEl);
+  if (!form.get("product_id")) return;
   await api("/api/formulas", {
     method: "POST",
     body: JSON.stringify(Object.fromEntries(form.entries())),
   });
+  formEl.querySelector("input[name='quantity_per_unit']").value = "";
   await renderFormulas();
-});
-
-document.querySelector("#path-import").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const path = new FormData(event.currentTarget).get("path");
-  const result = await api("/api/import/path", { method: "POST", body: JSON.stringify({ path }) });
-  document.querySelector("#import-result").textContent = JSON.stringify(result, null, 2);
-  await loadReference();
-});
-
-document.querySelector("#upload-import").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const result = await api("/api/import/upload", { method: "POST", body: new FormData(event.currentTarget) });
-  document.querySelector("#import-result").textContent = JSON.stringify(result, null, 2);
-  await loadReference();
 });
 
 loadReference().then(() => activate("dashboard")).catch((error) => {

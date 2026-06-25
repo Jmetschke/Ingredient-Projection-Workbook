@@ -12,11 +12,10 @@
       <nav id="tabs">
         <button data-tab="dashboard" class="active">Dashboard</button>
         <button data-tab="production">Production Planner</button>
+        <button data-tab="rl-scheduled-batches">RL Scheduled Batches</button>
         <button data-tab="forecast">Ingredient Forecast</button>
         <button data-tab="inventory">Inventory</button>
         <button data-tab="formulas">Formula Manager</button>
-        <button data-tab="reports">Reports</button>
-        <button data-tab="import">Import / Export</button>
       </nav>
     </aside>
 
@@ -56,12 +55,57 @@
           <span>Editable input</span>
         </div>
         <form id="production-batch-form" class="inline-form">
-          <select name="batch_type" required></select>
-          <select name="product_id" required></select>
-          <select name="week_id" required></select>
-          <input name="quantity" type="number" step="1" min="1" placeholder="Quantity" required>
+          <label class="form-field">
+            <span>Batch Type</span>
+            <select name="batch_type" required></select>
+          </label>
+          <label class="form-field">
+            <span>Product</span>
+            <select name="product_id" required></select>
+          </label>
+          <label class="form-field">
+            <span>Production Week</span>
+            <select name="week_id" required></select>
+          </label>
+          <label class="form-field">
+            <span>Quantity</span>
+            <input name="quantity" type="number" step="1" min="1" placeholder="Quantity" required>
+          </label>
           <button>Add Batch</button>
         </form>
+        <div class="section-head">
+          <h2>Scheduled Production Calendar</h2>
+        </div>
+        <div class="production-tools">
+          <label class="form-field">
+            <span>Batch Type</span>
+            <select id="production-filter-batch-type">
+              <option value="">Both</option>
+              <option value="Snackbar">SB</option>
+              <option value="Hijnx">Hijnx</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>Start Week</span>
+            <select id="production-filter-start"></select>
+          </label>
+          <label class="form-field">
+            <span>End Week</span>
+            <select id="production-filter-end"></select>
+          </label>
+          <label class="form-field">
+            <span>Show</span>
+            <select id="production-calendar-months">
+              <option value="6">6 months</option>
+              <option value="9">9 months</option>
+              <option value="12">12 months</option>
+            </select>
+          </label>
+          <a id="production-ingredient-export" class="button-link" href="/api/export/production-ingredients">Export Ingredient Report</a>
+        </div>
+        <div id="production-calendar"></div>
+        <h2>Ingredient Needs For Filtered Production</h2>
+        <div id="production-ingredient-report"></div>
         <div class="section-head">
           <h2>Weekly Production Quantities</h2>
           <span>Aggregate plan</span>
@@ -69,6 +113,24 @@
         <div id="production-table"></div>
         <h2>Recent Batches</h2>
         <div id="production-batches"></div>
+      </section>
+
+      <section id="rl-scheduled-batches" class="view">
+        <div class="section-head">
+          <h2>RL Scheduled Batches</h2>
+          <label class="compact-field">
+            <span>Show</span>
+            <select id="rl-calendar-months">
+              <option value="6">6 months</option>
+              <option value="9">9 months</option>
+              <option value="12">12 months</option>
+            </select>
+          </label>
+        </div>
+        <div id="rl-calendar-status" class="source-note"></div>
+        <div id="rl-scheduled-calendar"></div>
+        <h2>Scheduled Batch Rows</h2>
+        <div id="rl-scheduled-table"></div>
       </section>
 
       <section id="forecast" class="view">
@@ -82,73 +144,65 @@
 
       <section id="inventory" class="view">
         <div class="section-head">
-          <h2>Inventory Settings</h2>
-          <span>Editable reorder inputs</span>
+          <h2>Add Inventory Item</h2>
+          <span>Master list entry</span>
         </div>
+        <form id="inventory-item-form" class="inline-form inventory-add-form">
+          <label class="form-field">
+            <span>Item Name</span>
+            <input name="name" placeholder="Ingredient or supply name" required>
+          </label>
+          <label class="form-field">
+            <span>Purchase UOM</span>
+            <input name="purchase_uom" placeholder="lb, kg, each">
+          </label>
+          <label class="form-field">
+            <span>Unit Size</span>
+            <input name="purchase_unit_size" type="number" step="0.0001" min="0" placeholder="0">
+          </label>
+          <button>Add Item</button>
+        </form>
+        <div id="inventory-message" class="source-note"></div>
+        <h2>Master Inventory Items</h2>
         <div id="inventory-table"></div>
       </section>
 
       <section id="formulas" class="view">
         <div class="section-head">
-          <h2>Product BOM</h2>
-          <span>Imported formula links and source tab lines</span>
+          <h2>Production Batch BOMs</h2>
+          <span>All quantities are grams</span>
         </div>
-        <form id="formula-form" class="inline-form">
-          <select name="product_id" required></select>
-          <select name="ingredient_id" required></select>
-          <input name="quantity_per_unit" type="number" step="0.000001" placeholder="Qty per unit" required>
-          <input name="quantity_uom" placeholder="UOM">
-          <button>Add / Update</button>
-        </form>
-        <div id="formula-table"></div>
-        <h2>Formula Tab Source Lines</h2>
-        <div id="formula-lines"></div>
-      </section>
-
-      <section id="reports" class="view">
-        <div class="grid two">
-          <section>
-            <h2>Monthly Ingredient Cost</h2>
-            <div id="monthly-cost"></div>
-          </section>
-          <section>
-            <h2>Product Cost Summary</h2>
-            <div id="product-cost"></div>
-          </section>
-        </div>
-        <section>
-          <h2>Weekly Usage</h2>
-          <div id="weekly-usage"></div>
-        </section>
-      </section>
-
-      <section id="import" class="view">
-        <div class="grid two">
-          <section>
-            <h2>Import Workbook</h2>
-            <form id="path-import" class="stack-form">
-              <label>Server file path</label>
-              <input name="path" value="/Users/jhaskin/Downloads/Elevated Organics Production Planning Workbook v031225.xlsx">
-              <button>Import From Path</button>
-            </form>
-            <form id="upload-import" class="stack-form">
-              <label>Upload workbook</label>
-              <input name="workbook" type="file" accept=".xlsx,.xlsm,.xls">
-              <button>Upload And Import</button>
-            </form>
-            <pre id="import-result"></pre>
-          </section>
-          <section>
-            <h2>Export</h2>
-            <div class="export-buttons">
-              <a href="/api/export/ingredients">Ingredients XLSX</a>
-              <a href="/api/export/production">Production XLSX</a>
-              <a href="/api/export/forecast">Forecast XLSX</a>
-              <a href="/api/export/recommendations">Recommendations XLSX</a>
+        <div class="bom-layout">
+          <div>
+            <h2>Production Batches</h2>
+            <div id="formula-batch-list" class="batch-list"></div>
+          </div>
+          <div id="formula-focus" class="focus-panel">
+            <div class="section-head">
+              <h2 id="formula-focus-title">Select a batch</h2>
+              <span id="formula-focus-meta"></span>
             </div>
-          </section>
+            <form id="formula-form" class="inline-form bom-form">
+              <input name="product_id" type="hidden">
+              <label class="form-field">
+                <span>Ingredient</span>
+                <select name="ingredient_id" required></select>
+              </label>
+              <label class="form-field">
+                <span>Grams Per Unit</span>
+                <input name="quantity_per_unit" type="number" step="0.000001" min="0" placeholder="0" required>
+              </label>
+              <label class="form-field">
+                <span>UOM</span>
+                <input value="grams" disabled>
+              </label>
+              <button>Add / Update</button>
+            </form>
+            <div id="formula-table"></div>
+          </div>
         </div>
       </section>
+
     </main>
 
     <script src="/app.js"></script>

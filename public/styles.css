@@ -106,7 +106,7 @@ input, select {
   min-width: 0;
 }
 
-button, .export-buttons a {
+button, .export-buttons a, .button-link {
   border: 1px solid #1f5d55;
   background: var(--accent);
   color: white;
@@ -244,9 +244,175 @@ tr.warning td {
 
 .inline-form {
   display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  grid-template-columns: repeat(4, minmax(130px, 1fr)) minmax(120px, auto);
   gap: 10px;
   margin-bottom: 14px;
+  align-items: end;
+}
+
+.form-field, .compact-field {
+  display: grid;
+  gap: 5px;
+}
+
+.form-field span, .compact-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.compact-field {
+  grid-template-columns: auto minmax(130px, 1fr);
+  align-items: center;
+}
+
+#production-calendar, #rl-scheduled-calendar {
+  display: grid;
+  gap: 14px;
+}
+
+.calendar-month {
+  display: grid;
+  gap: 10px;
+}
+
+.calendar-month h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.week-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  min-height: 138px;
+  padding: 10px;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 8px;
+}
+
+.week-card.read-only {
+  background: #f7faf9;
+}
+
+.week-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.week-card-head strong {
+  font-size: 14px;
+}
+
+.week-card-head span, .week-range, .empty-week {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.week-batches {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.batch-chip {
+  border-left: 3px solid var(--accent);
+  background: white;
+  border-radius: 6px;
+  padding: 7px 8px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.batch-chip span, .batch-chip em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.batch-chip strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.empty-calendar {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 14px;
+}
+
+.source-note {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: -8px;
+}
+
+.inventory-add-form {
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) minmax(120px, auto);
+}
+
+.production-tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr)) minmax(180px, auto);
+  gap: 10px;
+  align-items: end;
+}
+
+.bom-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.batch-list {
+  display: grid;
+  gap: 8px;
+}
+
+.batch-list-item {
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  text-align: left;
+}
+
+.batch-list-item.active, .batch-list-item:hover {
+  border-color: #1f5d55;
+  background: #edf7f5;
+  color: var(--ink);
+}
+
+.batch-list-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.focus-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfc;
+}
+
+.bom-form {
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) minmax(90px, 110px) minmax(120px, auto);
 }
 
 .stack-form {
@@ -285,7 +451,7 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .topbar, .grid.two, .inline-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .bom-layout, .bom-form {
     grid-template-columns: 1fr;
     display: grid;
   }

@@ -19,6 +19,8 @@ Set these environment variables in Render:
 ```bash
 TURSO_DATABASE_URL=libsql://your-database.turso.io
 TURSO_DATABASE_TOKEN=your-token
+TURSO_CALENDAR_URL=libsql://your-readonly-calendar-database.turso.io
+TURSO_CALENDAR_TOKEN=your-calendar-token
 ```
 
 The app also supports local development with:
@@ -26,6 +28,8 @@ The app also supports local development with:
 ```bash
 DATABASE_PATH=./data/planning.db
 ```
+
+`TURSO_CALENDAR_URL` and `TURSO_CALENDAR_TOKEN` power the read-only RL Scheduled Batches tab. If the source table cannot be auto-detected, set `TURSO_CALENDAR_TABLE` to the table or view name.
 
 The schema is created automatically on startup. To seed data into Turso, run the import script in an environment with `TURSO_DATABASE_URL` and `TURSO_DATABASE_TOKEN` set:
 
