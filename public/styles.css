@@ -701,6 +701,17 @@ tr.warning td {
   background: #fbfcfc;
 }
 
+.bom-copy-panel {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+}
+
+.bom-copy-panel h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
 .bom-form {
   grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) minmax(90px, 110px) minmax(120px, auto);
 }
