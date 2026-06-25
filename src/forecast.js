@@ -23,10 +23,10 @@ export async function calculateForecast() {
   const weeks = await all("SELECT * FROM weeks ORDER BY week_start");
   const ingredients = await all("SELECT * FROM ingredients WHERE active = 1 ORDER BY name");
   const usageRows = await all(`
-    SELECT pf.ingredient_id, pp.week_id, SUM(pp.planned_qty * COALESCE(pf.quantity_per_unit, 0)) AS required_usage
-    FROM production_plan pp
-    JOIN product_formulas pf ON pf.product_id = pp.product_id
-    GROUP BY pf.ingredient_id, pp.week_id
+    SELECT pf.ingredient_id, pb.week_id, SUM(pb.quantity * COALESCE(pf.quantity_per_unit, 0)) AS required_usage
+    FROM production_batches pb
+    JOIN product_formulas pf ON pf.product_id = pb.product_id AND pf.source_sheet IS NULL
+    GROUP BY pf.ingredient_id, pb.week_id
   `);
   const receipts = await all(`
     SELECT ingredient_id, week_id, SUM(quantity_received) AS quantity_received
@@ -35,8 +35,6 @@ export async function calculateForecast() {
   `);
   const usage = new Map(usageRows.map((r) => [`${r.ingredient_id}:${r.week_id}`, Number(r.required_usage) || 0]));
   const receiptMap = new Map(receipts.map((r) => [`${r.ingredient_id}:${r.week_id}`, Number(r.quantity_received) || 0]));
-  const importedBalances = await all("SELECT ingredient_id, week_id, beginning_qty FROM inventory_balances");
-  const balanceMap = new Map(importedBalances.map((r) => [`${r.ingredient_id}:${r.week_id}`, Number(r.beginning_qty) || 0]));
 
   const output = [];
   const recs = [];
@@ -48,9 +46,8 @@ export async function calculateForecast() {
       const key = `${ingredient.id}:${week.id}`;
       const received = receiptMap.get(key) || 0;
       const requiredUsage = usage.get(key) || 0;
-      const importedBeginning = balanceMap.get(key);
       const beginning = priorEnding === null
-        ? (importedBeginning ?? 0) + received
+        ? received
         : priorEnding + received;
       const ending = beginning - requiredUsage;
       const threshold = Number(ingredient.reorder_threshold) || 0;

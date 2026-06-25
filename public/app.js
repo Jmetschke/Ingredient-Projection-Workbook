@@ -15,7 +15,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const titles = {
   dashboard: ["Dashboard", "Inventory warnings, upcoming production, and purchase timing."],
-  production: ["Production Planner", "Editable weekly planned production by SKU."],
+  production: ["Production Planner", "Schedule batches and calculate ingredient needs from calendar entries."],
   "rl-scheduled-batches": ["RL Scheduled Batches", "Read-only calendar from the RL scheduling database."],
   forecast: ["Ingredient Forecast", "Projected usage, receipts, ending inventory, and shortages."],
   inventory: ["Inventory", "Add new items to the master inventory list."],
@@ -251,7 +251,7 @@ async function renderProduction() {
   const html = `<div class="table-wrap"><table><thead><tr><th>Batch Type</th><th>Product</th>${filteredWeeks.map((w) => `<th class="numeric">W${w.weekNumber}<br>${w.week_start}</th>`).join("")}</tr></thead><tbody>${
     rows.map((product) => `<tr><td>${escapeHtml(product.category || "")}</td><td>${escapeHtml(product.name)}</td>${filteredWeeks.map((week) => {
       const entry = plan.get(`${product.id}:${week.id}`);
-      return `<td class="numeric"><input class="editable plan-input" data-product="${product.id}" data-week="${week.id}" type="number" step="1" value="${entry?.planned_qty || 0}"></td>`;
+      return `<td class="numeric">${qty(entry?.planned_qty || 0)}</td>`;
     }).join("")}</tr>`).join("")
   }</tbody></table></div>`;
   document.querySelector("#production-table").innerHTML = html;
@@ -264,14 +264,6 @@ async function renderProduction() {
   ], filteredRows((data.recentBatches || data.batches).filter((batch) => (!state.productionBatchType || batch.batch_type === state.productionBatchType)
     && (!state.productionStartWeek || batch.week_start >= state.productionStartWeek)
     && (!state.productionEndWeek || batch.week_start <= state.productionEndWeek)), ["week_start", "batch_type", "product_name"]));
-  document.querySelectorAll(".plan-input").forEach((input) => {
-    input.addEventListener("change", async () => {
-      await api("/api/production-plan", {
-        method: "POST",
-        body: JSON.stringify({ product_id: input.dataset.product, week_id: input.dataset.week, planned_qty: input.value }),
-      });
-    });
-  });
 }
 
 function productionReportQuery() {

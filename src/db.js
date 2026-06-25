@@ -114,7 +114,7 @@ export async function ensureMasterProducts() {
       );
     } else {
       await run(
-        "INSERT INTO products (name, category, source_sheet, active) VALUES (?, ?, 'Master Product List', 1)",
+        "INSERT INTO products (name, category, active) VALUES (?, ?, 1)",
         [product.name, product.batchType],
       );
     }
@@ -126,12 +126,12 @@ export async function ensureMasterIngredients() {
     const existing = await one("SELECT id FROM ingredients WHERE name = ?", [name]);
     if (existing) {
       await run(
-        "UPDATE ingredients SET is_master = 1, source_sheet = COALESCE(source_sheet, 'Master Ingredient List'), active = 1 WHERE id = ?",
+        "UPDATE ingredients SET is_master = 1, active = 1 WHERE id = ?",
         [existing.id],
       );
     } else {
       await run(
-        "INSERT INTO ingredients (name, source_sheet, is_master, active) VALUES (?, 'Master Ingredient List', 1, 1)",
+        "INSERT INTO ingredients (name, is_master, active) VALUES (?, 1, 1)",
         [name],
       );
     }
