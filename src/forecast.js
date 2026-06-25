@@ -96,6 +96,13 @@ export async function regenerateRecommendations() {
         (ingredient_id, needed_week_id, order_week_id, recommended_qty, projected_ending_qty, estimated_cost, reason)
       VALUES
         (@ingredient_id, @needed_week_id, @order_week_id, @recommended_qty, @projected_ending_qty, @estimated_cost, @reason)
+      ON CONFLICT(ingredient_id, needed_week_id) DO UPDATE SET
+        order_week_id = excluded.order_week_id,
+        recommended_qty = excluded.recommended_qty,
+        projected_ending_qty = excluded.projected_ending_qty,
+        estimated_cost = excluded.estimated_cost,
+        reason = excluded.reason,
+        generated_at = CURRENT_TIMESTAMP
     `, rec);
   }
   return recommendations;
