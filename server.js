@@ -44,16 +44,24 @@ function findColumn(columns, candidates) {
   return null;
 }
 
+function valueFromColumns(row, columns) {
+  for (const column of columns) {
+    if (column && row[column] !== undefined && row[column] !== null && row[column] !== "") return row[column];
+  }
+  return null;
+}
+
 function selectRlBatchSource(schema) {
   const requested = process.env.TURSO_CALENDAR_TABLE;
   const candidates = requested
     ? schema.filter((table) => table.name === requested)
-    : schema.filter((table) => /batch|schedule|calendar|production/i.test(table.name));
+    : schema;
   const scored = candidates.map((table) => {
     const columns = table.columns.map((column) => column.toLowerCase());
     const score = [
+      /batch|schedule|calendar|production|event|task/i.test(table.name),
       columns.some((column) => /date|week|start/.test(column)),
-      columns.some((column) => /product|item|sku|name/.test(column)),
+      columns.some((column) => /product|item|sku|name|title/.test(column)),
       columns.some((column) => /qty|quantity|amount|units/.test(column)),
     ].filter(Boolean).length;
     return { table, score };
@@ -62,22 +70,59 @@ function selectRlBatchSource(schema) {
 }
 
 function normalizeRlBatch(row, source) {
-  const dateColumn = source.dateColumn;
-  const productColumn = source.productColumn;
-  const typeColumn = source.typeColumn;
-  const qtyColumn = source.qtyColumn;
-  const statusColumn = source.statusColumn;
-  const notesColumn = source.notesColumn;
+  const scheduledDate = valueFromColumns(row, source.dateColumns);
+  const productName = valueFromColumns(row, source.productColumns);
+  const title = valueFromColumns(row, source.titleColumns);
+  const type = valueFromColumns(row, source.typeColumns);
+  const category = valueFromColumns(row, source.categoryColumns);
+  const quantity = valueFromColumns(row, source.qtyColumns);
+  const completion = valueFromColumns(row, source.completionColumns);
+  const status = valueFromColumns(row, source.statusColumns);
+  const notes = valueFromColumns(row, source.notesColumns);
+  const units = valueFromColumns(row, source.unitColumns);
   return {
     id: row.id ?? row.batch_id ?? row.uuid ?? null,
-    scheduled_date: dateColumn ? row[dateColumn] : null,
-    product_name: productColumn ? row[productColumn] : "",
-    batch_type: typeColumn ? row[typeColumn] : "",
-    quantity: qtyColumn ? row[qtyColumn] : null,
-    status: statusColumn ? row[statusColumn] : "",
-    notes: notesColumn ? row[notesColumn] : "",
+    scheduled_date: scheduledDate,
+    product_name: productName || title || "",
+    title: title || productName || "",
+    batch_type: type || category || "",
+    category: category || type || "",
+    quantity,
+    quantity_uom: units || "",
+    completion,
+    status: status || "",
+    notes: notes || "",
     raw: row,
   };
+}
+
+function localIsoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDateDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function mondayForDate(date = new Date()) {
+  const day = date.getDay();
+  const daysSinceMonday = (day + 6) % 7;
+  return addDateDays(date, -daysSinceMonday);
+}
+
+async function ensureForwardWeeks(count = 78) {
+  const start = mondayForDate(new Date());
+  for (let index = 0; index < count; index += 1) {
+    const weekStart = localIsoDate(addDateDays(start, index * 7));
+    await run(
+      `INSERT INTO weeks (week_start, label)
+       VALUES (?, ?)
+       ON CONFLICT(week_start) DO NOTHING`,
+      [weekStart, weekStart],
+    );
+  }
 }
 
 function productionIngredientFilters(query) {
@@ -195,7 +240,14 @@ app.get("/api/summary", async (req, res) => {
   }
 });
 
-app.get("/api/weeks", async (req, res) => ok(res, await all("SELECT * FROM weeks ORDER BY week_start")));
+app.get("/api/weeks", async (req, res) => {
+  try {
+    await ensureForwardWeeks();
+    ok(res, await all("SELECT * FROM weeks ORDER BY week_start"));
+  } catch (error) {
+    fail(res, error);
+  }
+});
 app.get("/api/products", async (req, res) => ok(res, await all("SELECT * FROM products ORDER BY name")));
 app.get("/api/ingredients", async (req, res) => {
   ok(res, await all("SELECT * FROM ingredients ORDER BY is_master DESC, name"));
@@ -243,24 +295,51 @@ app.get("/api/rl-scheduled-batches", async (req, res) => {
         message: "No likely scheduled batch table was found in the RL calendar database.",
       });
     }
-    const dateColumn = findColumn(table.columns, ["scheduled_date", "production_date", "date", "week_start", "start_date", "batch_date"]);
-    const productColumn = findColumn(table.columns, ["product_name", "product", "item_name", "item", "sku", "name"]);
-    const typeColumn = findColumn(table.columns, ["batch_type", "type", "category"]);
-    const qtyColumn = findColumn(table.columns, ["quantity", "qty", "batch_qty", "amount", "units"]);
-    const statusColumn = findColumn(table.columns, ["status", "state"]);
-    const notesColumn = findColumn(table.columns, ["notes", "note", "description"]);
-    if (!dateColumn || !productColumn) {
+    const source = {
+      table: table.name,
+      dateColumns: [
+        findColumn(table.columns, ["scheduled_date", "production_date", "calendar_date", "due_date", "date", "week_start", "start_date", "batch_date"]),
+        findColumn(table.columns, ["created_for", "scheduled_for"]),
+      ].filter(Boolean),
+      productColumns: [
+        findColumn(table.columns, ["product_name", "product", "item_name", "item", "sku", "name"]),
+      ].filter(Boolean),
+      titleColumns: [
+        findColumn(table.columns, ["title", "summary", "description", "label"]),
+      ].filter(Boolean),
+      typeColumns: [
+        findColumn(table.columns, ["batch_type", "production_type", "type"]),
+      ].filter(Boolean),
+      categoryColumns: [
+        findColumn(table.columns, ["category", "calendar_type", "event_type", "kind"]),
+      ].filter(Boolean),
+      qtyColumns: [
+        findColumn(table.columns, ["quantity", "qty", "batch_qty", "amount", "units", "unit_count"]),
+      ].filter(Boolean),
+      unitColumns: [
+        findColumn(table.columns, ["quantity_uom", "uom", "unit", "units_label"]),
+      ].filter(Boolean),
+      completionColumns: [
+        findColumn(table.columns, ["completion", "completion_percent", "percent_complete", "progress", "completed_percent"]),
+      ].filter(Boolean),
+      statusColumns: [
+        findColumn(table.columns, ["status", "state"]),
+      ].filter(Boolean),
+      notesColumns: [
+        findColumn(table.columns, ["notes", "note", "description", "details"]),
+      ].filter(Boolean),
+    };
+    if (!source.dateColumns.length || (!source.productColumns.length && !source.titleColumns.length)) {
       return ok(res, {
         configured: true,
-        source: { table: table.name, dateColumn, productColumn, typeColumn, qtyColumn, statusColumn, notesColumn },
+        source,
         schema,
         batches: [],
         message: "The RL calendar table was found, but date and product columns could not both be identified.",
       });
     }
-    const orderColumn = quoteIdentifier(dateColumn);
+    const orderColumn = quoteIdentifier(source.dateColumns[0]);
     const rows = await calendarAll(`SELECT * FROM ${quoteIdentifier(table.name)} ORDER BY ${orderColumn}`);
-    const source = { table: table.name, dateColumn, productColumn, typeColumn, qtyColumn, statusColumn, notesColumn };
     ok(res, {
       configured: true,
       source,
@@ -290,6 +369,7 @@ app.patch("/api/ingredients/:id", async (req, res) => {
 
 app.get("/api/production-plan", async (req, res) => {
   try {
+    await ensureForwardWeeks();
     ok(res, {
       batchTypes: BATCH_TYPES,
       weeks: await all("SELECT * FROM weeks ORDER BY week_start"),

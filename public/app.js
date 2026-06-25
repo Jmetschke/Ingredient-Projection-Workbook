@@ -11,7 +11,6 @@ const state = {
   selectedFormulaProductId: "",
 };
 
-const PAY_PERIOD_ANCHOR_2026 = new Date(2026, 0, 3);
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const titles = {
@@ -82,11 +81,14 @@ function saturdayForWeek(weekStart) {
 }
 
 function weekMeta(week) {
-  const blockStart = saturdayForWeek(week.week_start);
-  const blockEnd = addDays(blockStart, 8);
-  const weeksFromAnchor = Math.floor((blockStart - PAY_PERIOD_ANCHOR_2026) / (7 * MS_PER_DAY));
-  const weekNumber = Math.max(1, weeksFromAnchor + 1);
-  const payPeriod = Math.max(1, Math.floor(weeksFromAnchor / 2) + 1);
+  const blockStart = parseIsoDate(week.week_start);
+  const blockEnd = addDays(blockStart, 6);
+  const yearStart = new Date(blockStart.getFullYear(), 0, 1);
+  const firstMonday = addDays(yearStart, (1 - yearStart.getDay() + 7) % 7);
+  const weekNumber = blockStart < firstMonday
+    ? 1
+    : Math.floor((blockStart - firstMonday) / (7 * MS_PER_DAY)) + 1;
+  const payPeriod = Math.max(1, Math.floor((weekNumber - 1) / 2) + 1);
   const formatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
   const yearFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
   return {
@@ -173,6 +175,9 @@ async function renderProduction() {
   const reportStartSelect = document.querySelector("#production-filter-start");
   const reportEndSelect = document.querySelector("#production-filter-end");
   const weeks = data.weeks.map(weekMeta);
+  const currentWeekStart = currentWeekStartIso();
+  const schedulingWeeks = weeks.filter((week) => week.week_start >= currentWeekStart);
+  const weekOptions = schedulingWeeks.length ? schedulingWeeks : weeks;
   const defaultWeeks = visibleCalendarWeeks(weeks, state.productionCalendarMonths);
   if (!state.productionStartWeek) state.productionStartWeek = defaultWeeks[0]?.week_start || weeks[0]?.week_start || "";
   if (!state.productionEndWeek) state.productionEndWeek = defaultWeeks.at(-1)?.week_start || weeks.at(-1)?.week_start || "";
@@ -186,7 +191,7 @@ async function renderProduction() {
   const ingredientReport = await api(`/api/production-ingredient-report${productionReportQuery()}`);
 
   batchTypeSelect.innerHTML = data.batchTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
-  weekSelect.innerHTML = weeks.map((week) => `<option value="${week.id}">${escapeHtml(week.label)}</option>`).join("");
+  weekSelect.innerHTML = weekOptions.map((week) => `<option value="${week.id}">${escapeHtml(week.label)}</option>`).join("");
   calendarMonthsSelect.value = String(state.productionCalendarMonths);
   calendarMonthsSelect.onchange = async () => {
     state.productionCalendarMonths = Number(calendarMonthsSelect.value) || 6;
@@ -285,6 +290,45 @@ function visibleCalendarWeeks(weeks, monthCount) {
   return weeks.filter((week) => week.blockEnd >= firstVisible && week.blockStart < lastVisible);
 }
 
+function sundayForDate(date = new Date()) {
+  return addDays(date, -date.getDay());
+}
+
+function dateLabel(date, includeYear = false) {
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: includeYear ? "numeric" : undefined }).format(date);
+}
+
+function rlCategory(batch) {
+  const raw = String(batch.category || batch.batch_type || batch.type || "").toLowerCase();
+  const text = `${raw} ${String(batch.product_name || "")}`.toLowerCase();
+  if (text.includes("pickup")) return "pickup";
+  if (text.includes("event")) return "event";
+  if (text.includes("task")) return "task";
+  if (text.includes("snackbar") || raw === "sb") return "sb";
+  if (text.includes("hijnx") || text.includes("hijinx")) return "hijnx";
+  return "task";
+}
+
+function rlCategoryLabel(category) {
+  return ({ hijnx: "Hijnx", sb: "SB", pickup: "Pickup", event: "Event", task: "Task" })[category] || "Task";
+}
+
+function rlCalendarDays() {
+  const start = sundayForDate(new Date());
+  return Array.from({ length: 42 }, (_, index) => addDays(start, index));
+}
+
+function rlEntryTitle(batch, category) {
+  const name = batch.product_name || batch.title || "Scheduled item";
+  return `${rlCategoryLabel(category)}: ${name}`;
+}
+
+function currentWeekStartIso() {
+  const today = new Date();
+  const daysSinceMonday = (today.getDay() + 6) % 7;
+  return isoDate(addDays(today, -daysSinceMonday));
+}
+
 function renderProductionCalendar(batches, weeks) {
   const batchesByWeek = new Map();
   batches.forEach((batch) => {
@@ -330,61 +374,79 @@ function renderProductionCalendar(batches, weeks) {
 
 async function renderRlScheduledBatches() {
   const data = await api("/api/rl-scheduled-batches");
-  const monthsSelect = document.querySelector("#rl-calendar-months");
-  monthsSelect.value = String(state.rlCalendarMonths);
-  monthsSelect.onchange = async () => {
-    state.rlCalendarMonths = Number(monthsSelect.value) || 6;
-    await renderRlScheduledBatches();
-  };
 
   document.querySelector("#rl-calendar-status").textContent = data.source
     ? `Read only source: ${data.source.table}`
     : (data.message || "Read only source is not available.");
 
-  const weeks = state.weeks.map(weekMeta);
-  const visibleWeeks = visibleCalendarWeeks(weeks, state.rlCalendarMonths);
-  const batchesByBlock = new Map();
+  const days = rlCalendarDays();
+  const firstDay = days[0];
+  const lastDay = days.at(-1);
+  const batchesByDay = new Map();
   (data.batches || []).forEach((batch) => {
-    const blockStart = saturdayForWeek(batch.scheduled_date);
-    if (!blockStart) return;
-    const key = isoDate(blockStart);
-    if (!batchesByBlock.has(key)) batchesByBlock.set(key, []);
-    batchesByBlock.get(key).push(batch);
+    const date = parseIsoDate(batch.scheduled_date);
+    if (!date || date < firstDay || date > lastDay) return;
+    const key = isoDate(date);
+    if (!batchesByDay.has(key)) batchesByDay.set(key, []);
+    batchesByDay.get(key).push(batch);
   });
-  const monthGroups = visibleWeeks.reduce((groups, week) => {
-    if (!groups.has(week.monthKey)) groups.set(week.monthKey, { label: week.monthLabel, weeks: [] });
-    groups.get(week.monthKey).weeks.push(week);
-    return groups;
-  }, new Map());
-  const calendarHtml = Array.from(monthGroups.values()).map((group) => `
-    <div class="calendar-month">
-      <h3>${escapeHtml(group.label)}</h3>
-      <div class="week-grid">
-        ${group.weeks.map((week) => {
-          const scheduled = batchesByBlock.get(isoDate(week.blockStart)) || [];
-          return `
-            <article class="week-card read-only">
-              <div class="week-card-head">
-                <strong>Week ${week.weekNumber}</strong>
-                <span>PP ${week.payPeriod}</span>
-              </div>
-              <div class="week-range">${escapeHtml(week.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</div>
-              <div class="week-batches">
-                ${scheduled.length ? scheduled.map((batch) => `
-                  <div class="batch-chip">
-                    <span>${escapeHtml([batch.batch_type, batch.status].filter(Boolean).join(" - "))}</span>
-                    <strong>${escapeHtml(batch.product_name || "Scheduled batch")}</strong>
-                    <em>${batch.quantity == null ? "" : qty(batch.quantity)}</em>
-                  </div>
-                `).join("") : `<span class="empty-week">No batches</span>`}
-              </div>
-            </article>
-          `;
-        }).join("")}
-      </div>
+  const counts = { hijnx: 0, sb: 0, pickup: 0, event: 0, task: 0 };
+  Array.from(batchesByDay.values()).flat().forEach((batch) => {
+    counts[rlCategory(batch)] += 1;
+  });
+  document.querySelector("#rl-summary-cards").innerHTML = ["hijnx", "sb", "pickup", "event", "task"].map((category) => `
+    <div class="rl-stat ${category}">
+      <span>${rlCategoryLabel(category)}</span>
+      <strong>${counts[category]}</strong>
     </div>
   `).join("");
-  document.querySelector("#rl-scheduled-calendar").innerHTML = calendarHtml || `<div class="empty-calendar">No weeks found for this calendar window.</div>`;
+
+  const header = `
+    <div class="rl-calendar-head">
+      <div class="rl-calendar-title">${dateLabel(firstDay)} - ${dateLabel(lastDay, true)}</div>
+      <div class="rl-legend">
+        ${["hijnx", "sb", "pickup", "event", "task"].map((category) => `<span><i class="${category}"></i>${rlCategoryLabel(category)}</span>`).join("")}
+      </div>
+    </div>
+  `;
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="rl-day-name">${day}</div>`).join("");
+  const cells = days.map((day) => {
+    const key = isoDate(day);
+    const scheduled = batchesByDay.get(key) || [];
+    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+    const isToday = key === isoDate(new Date());
+    return `
+      <div class="rl-day ${isWeekend ? "weekend" : ""} ${isToday ? "today" : ""}">
+        <div class="rl-date">${dateLabel(day)}</div>
+        <div class="rl-day-items">
+          ${scheduled.map((batch) => {
+            const category = rlCategory(batch);
+            const completion = Math.max(0, Math.min(100, Number(batch.completion ?? 0) || 0));
+            const title = rlEntryTitle(batch, category);
+            const quantity = batch.quantity == null ? "" : ` - ${qty(batch.quantity)}${batch.quantity_uom ? ` ${escapeHtml(batch.quantity_uom)}` : ""}`;
+            return `
+              <div class="rl-event ${category}" title="${escapeHtml(`${title}${quantity}`)}">
+                <strong>${escapeHtml(title)}</strong>
+                ${category === "hijnx" || category === "sb" ? `
+                  <div class="rl-completion">
+                    <span>Completion</span>
+                    <em>${completion}%</em>
+                  </div>
+                  <div class="rl-progress"><span style="width: ${completion}%"></span></div>
+                ` : ""}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+  document.querySelector("#rl-scheduled-calendar").innerHTML = `
+    <div class="rl-calendar-panel">
+      ${header}
+      <div class="rl-calendar-grid">${dayNames}${cells}</div>
+    </div>
+  `;
 
   if (data.message && data.schema?.length) {
     document.querySelector("#rl-scheduled-table").innerHTML = table([
