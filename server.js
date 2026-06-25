@@ -7,6 +7,7 @@ import { all, one, run } from "./src/db.js";
 import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
 import { calculateForecast, regenerateRecommendations, weekIdForDate } from "./src/forecast.js";
 import { BATCH_TYPES } from "./src/master-products.js";
+import { bomUomForIngredient } from "./src/master-ingredients.js";
 
 dotenv.config();
 
@@ -18,6 +19,10 @@ app.use(express.static(path.resolve("public")));
 
 function ok(res, data) {
   res.json({ ok: true, data });
+}
+
+function withBomUom(row) {
+  return row ? { ...row, bom_uom: bomUomForIngredient(row.name) } : row;
 }
 
 function fail(res, error, status = 500) {
@@ -144,7 +149,7 @@ async function productionIngredientReport(query = {}) {
   const { where, params } = productionIngredientFilters(query);
   const rows = await all(`
     SELECT i.name AS ingredient_name,
-           'grams' AS quantity_uom,
+           COALESCE(pf.quantity_uom, 'grams') AS quantity_uom,
            SUM(pb.quantity * COALESCE(pf.quantity_per_unit, 0)) AS required_qty,
            COUNT(DISTINCT p.id) AS product_count,
            GROUP_CONCAT(DISTINCT p.name) AS products,
@@ -156,8 +161,8 @@ async function productionIngredientReport(query = {}) {
     JOIN product_formulas pf ON pf.product_id = pb.product_id AND pf.source_sheet IS NULL
     JOIN ingredients i ON i.id = pf.ingredient_id
     WHERE ${where}
-    GROUP BY i.id
-    ORDER BY i.name
+    GROUP BY i.id, COALESCE(pf.quantity_uom, 'grams')
+    ORDER BY i.name, quantity_uom
   `, params);
   const detail = await all(`
     SELECT w.week_start,
@@ -165,7 +170,7 @@ async function productionIngredientReport(query = {}) {
            p.name AS product_name,
            pb.quantity AS planned_qty,
            i.name AS ingredient_name,
-           'grams' AS quantity_uom,
+           COALESCE(pf.quantity_uom, 'grams') AS quantity_uom,
            COALESCE(pf.quantity_per_unit, 0) AS quantity_per_unit,
            pb.quantity * COALESCE(pf.quantity_per_unit, 0) AS required_qty
     FROM production_batches pb
@@ -249,12 +254,13 @@ app.get("/api/products", async (req, res) => {
   ok(res, await all("SELECT id, name, sku, category, active FROM products ORDER BY name"));
 });
 app.get("/api/ingredients", async (req, res) => {
-  ok(res, await all(`
+  const rows = await all(`
     SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
       reorder_threshold, lead_time_days, supplier_id, is_master, active
     FROM ingredients
     ORDER BY is_master DESC, name
-  `));
+  `);
+  ok(res, rows.map(withBomUom));
 });
 
 app.post("/api/ingredients", async (req, res) => {
@@ -271,12 +277,12 @@ app.post("/api/ingredients", async (req, res) => {
        VALUES (?, ?, ?, 1, 1)`,
       [name, purchaseUom, purchaseUnitSize],
     );
-    ok(res, await one(`
+    ok(res, withBomUom(await one(`
       SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
         reorder_threshold, lead_time_days, supplier_id, is_master, active
       FROM ingredients
       WHERE id = ?
-    `, [info.lastInsertRowid]));
+    `, [info.lastInsertRowid])));
   } catch (error) {
     fail(res, error);
   }
@@ -365,22 +371,22 @@ app.patch("/api/ingredients/:id", async (req, res) => {
     const allowed = ["purchase_uom", "purchase_unit_size", "cost_per_purchase_uom", "cost_per_unit", "reorder_threshold", "lead_time_days"];
     const fields = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
     if (!Object.keys(fields).length) {
-      return ok(res, await one(`
+      return ok(res, withBomUom(await one(`
         SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
           reorder_threshold, lead_time_days, supplier_id, is_master, active
         FROM ingredients
         WHERE id = ?
-      `, [req.params.id]));
+      `, [req.params.id])));
     }
     const sets = Object.keys(fields).map((key) => `${key} = @${key}`).join(", ");
     await run(`UPDATE ingredients SET ${sets} WHERE id = @id`, { ...fields, id: req.params.id });
     await regenerateRecommendations();
-    ok(res, await one(`
+    ok(res, withBomUom(await one(`
       SELECT id, name, purchase_uom, purchase_unit_size, cost_per_purchase_uom, cost_per_unit,
         reorder_threshold, lead_time_days, supplier_id, is_master, active
       FROM ingredients
       WHERE id = ?
-    `, [req.params.id]));
+    `, [req.params.id])));
   } catch (error) {
     fail(res, error);
   }
@@ -497,8 +503,9 @@ app.post("/api/formulas", async (req, res) => {
     }
     const ingredient = await one("SELECT * FROM ingredients WHERE id = ? AND is_master = 1", [ingredient_id]);
     if (!ingredient) return fail(res, new Error("Select a master ingredient"), 400);
-    const gramsPerUnit = Number(quantity_per_unit) || 0;
-    if (gramsPerUnit <= 0) return fail(res, new Error("Grams per unit must be greater than zero"), 400);
+    const quantityPerUnit = Number(quantity_per_unit) || 0;
+    if (quantityPerUnit <= 0) return fail(res, new Error("BOM quantity per unit must be greater than zero"), 400);
+    const quantityUom = bomUomForIngredient(ingredient.name);
     const existing = await one(
       "SELECT id FROM product_formulas WHERE product_id = ? AND ingredient_id = ? AND source_sheet IS NULL LIMIT 1",
       [product_id, ingredient_id],
@@ -506,14 +513,14 @@ app.post("/api/formulas", async (req, res) => {
     if (existing) {
       await run(
         "UPDATE product_formulas SET quantity_per_unit = ?, quantity_uom = ?, notes = ? WHERE id = ?",
-        [gramsPerUnit, "grams", notes || null, existing.id],
+        [quantityPerUnit, quantityUom, notes || null, existing.id],
       );
     } else {
       await run(
         `INSERT INTO product_formulas
           (product_id, ingredient_id, quantity_per_unit, quantity_uom, notes)
          VALUES (?, ?, ?, ?, ?)`,
-        [product_id, ingredient_id, gramsPerUnit, "grams", notes || null],
+        [product_id, ingredient_id, quantityPerUnit, quantityUom, notes || null],
       );
     }
     await regenerateRecommendations();

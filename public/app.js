@@ -19,7 +19,7 @@ const titles = {
   "rl-scheduled-batches": ["RL Scheduled Batches", "Read-only calendar from the RL scheduling database."],
   forecast: ["Ingredient Forecast", "Projected usage, receipts, ending inventory, and shortages."],
   inventory: ["Inventory", "Add new items to the master inventory list."],
-  formulas: ["Formula Manager", "Batch-level BOM setup using grams."],
+  formulas: ["Formula Manager", "Batch-level BOM setup using grams and each."],
 };
 
 async function api(path, options = {}) {
@@ -133,7 +133,7 @@ async function loadReference() {
 function fillSelects() {
   const productOptions = state.products.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
   const masterIngredients = state.ingredients.filter((ingredient) => Number(ingredient.is_master));
-  const ingredientOptions = masterIngredients.map((i) => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+  const ingredientOptions = masterIngredients.map((i) => `<option value="${i.id}" data-uom="${escapeHtml(i.bom_uom || "grams")}">${escapeHtml(i.name)}</option>`).join("");
   document.querySelectorAll("select[name='product_id']").forEach((el) => { el.innerHTML = productOptions; });
   document.querySelectorAll("select[name='ingredient_id']").forEach((el) => { el.innerHTML = ingredientOptions; });
   const filter = document.querySelector("#ingredient-filter");
@@ -508,14 +508,22 @@ async function renderFormulas() {
   const form = document.querySelector("#formula-form");
   form.querySelector("input[name='product_id']").value = selectedProduct?.id || "";
   document.querySelector("#formula-focus-title").textContent = selectedProduct ? selectedProduct.name : "Select a batch";
-  document.querySelector("#formula-focus-meta").textContent = selectedProduct ? `${selectedProduct.category || ""} BOM in grams` : "";
+  document.querySelector("#formula-focus-meta").textContent = selectedProduct ? `${selectedProduct.category || ""} BOM` : "";
+  updateFormulaUomDisplay();
 
   const selectedFormulas = data.formulas.filter((formula) => String(formula.product_id) === String(state.selectedFormulaProductId));
   document.querySelector("#formula-table").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
-    { label: "Grams / Unit", numeric: true, value: (r) => qty(r.quantity_per_unit) },
-    { label: "UOM", value: () => "grams" },
+    { label: "Qty / Unit", numeric: true, value: (r) => qty(r.quantity_per_unit) },
+    { label: "UOM", key: "quantity_uom" },
   ], filteredRows(selectedFormulas, ["ingredient_name"]));
+}
+
+function updateFormulaUomDisplay() {
+  const select = document.querySelector("#formula-form select[name='ingredient_id']");
+  const display = document.querySelector("#formula-uom-display");
+  if (!select || !display) return;
+  display.value = select.selectedOptions[0]?.dataset.uom || "grams";
 }
 
 const renderers = {
@@ -550,6 +558,7 @@ document.querySelector("#global-filter").addEventListener("input", async (event)
 });
 
 document.querySelector("#ingredient-filter").addEventListener("change", renderForecast);
+document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);
 
 document.querySelector("#inventory-item-form").addEventListener("submit", async (event) => {
   event.preventDefault();

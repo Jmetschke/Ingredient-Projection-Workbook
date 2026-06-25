@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@libsql/client";
 import dotenv from "dotenv";
-import { MASTER_INGREDIENTS } from "./master-ingredients.js";
+import { EACH_UOM_INGREDIENTS, MASTER_INGREDIENTS } from "./master-ingredients.js";
 import { MASTER_PRODUCTS } from "./master-products.js";
 
 dotenv.config();
@@ -140,3 +140,12 @@ export async function ensureMasterIngredients() {
 
 await ensureMasterProducts();
 await ensureMasterIngredients();
+
+for (const name of EACH_UOM_INGREDIENTS) {
+  await run(`
+    UPDATE product_formulas
+    SET quantity_uom = 'each'
+    WHERE source_sheet IS NULL
+      AND ingredient_id IN (SELECT id FROM ingredients WHERE name = ?)
+  `, [name]);
+}
