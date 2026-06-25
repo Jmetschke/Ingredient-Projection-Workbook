@@ -457,6 +457,47 @@ app.post("/api/production-batches", async (req, res) => {
   }
 });
 
+app.patch("/api/production-batches/:id", async (req, res) => {
+  try {
+    const existing = await one("SELECT * FROM production_batches WHERE id = ?", [req.params.id]);
+    if (!existing) return fail(res, new Error("Scheduled batch not found"), 404);
+
+    const batchType = req.body.batch_type || existing.batch_type;
+    const productId = req.body.product_id || existing.product_id;
+    const weekId = req.body.week_id || existing.week_id;
+    const qty = Number(req.body.quantity ?? existing.quantity) || 0;
+    const notes = req.body.notes ?? existing.notes;
+    const product = await one("SELECT * FROM products WHERE id = ?", [productId]);
+    if (!product) return fail(res, new Error("Unknown product"), 400);
+    if (!BATCH_TYPES.includes(batchType) || product.category !== batchType) {
+      return fail(res, new Error("Product does not match selected batch type"), 400);
+    }
+    if (qty <= 0) return fail(res, new Error("Quantity must be greater than zero"), 400);
+
+    await run(
+      `UPDATE production_batches
+       SET batch_type = ?, product_id = ?, week_id = ?, quantity = ?, notes = ?
+       WHERE id = ?`,
+      [batchType, productId, weekId, qty, notes || null, req.params.id],
+    );
+    await regenerateRecommendations();
+    ok(res, { id: Number(req.params.id), batch_type: batchType, product_id: productId, week_id: weekId, quantity: qty });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.delete("/api/production-batches/:id", async (req, res) => {
+  try {
+    const result = await run("DELETE FROM production_batches WHERE id = ?", [req.params.id]);
+    if (!result.changes) return fail(res, new Error("Scheduled batch not found"), 404);
+    await regenerateRecommendations();
+    ok(res, { id: Number(req.params.id) });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
 app.get("/api/forecast", async (req, res) => {
   try {
     const forecast = await calculateForecast();
@@ -525,6 +566,49 @@ app.post("/api/formulas", async (req, res) => {
     }
     await regenerateRecommendations();
     ok(res, { product_id, ingredient_id });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.patch("/api/formulas/:id", async (req, res) => {
+  try {
+    const existing = await one(`
+      SELECT pf.*, p.category, i.name AS ingredient_name
+      FROM product_formulas pf
+      JOIN products p ON p.id = pf.product_id
+      JOIN ingredients i ON i.id = pf.ingredient_id
+      WHERE pf.id = ? AND pf.source_sheet IS NULL
+    `, [req.params.id]);
+    if (!existing) return fail(res, new Error("BOM ingredient not found"), 404);
+    const ingredientId = req.body.ingredient_id || existing.ingredient_id;
+    const ingredient = await one("SELECT * FROM ingredients WHERE id = ? AND is_master = 1", [ingredientId]);
+    if (!ingredient) return fail(res, new Error("Select a master ingredient"), 400);
+    const duplicate = await one(
+      "SELECT id FROM product_formulas WHERE product_id = ? AND ingredient_id = ? AND source_sheet IS NULL AND id <> ? LIMIT 1",
+      [existing.product_id, ingredientId, req.params.id],
+    );
+    if (duplicate) return fail(res, new Error("That ingredient is already on this BOM"), 400);
+    const quantityPerUnit = Number(req.body.quantity_per_unit ?? existing.quantity_per_unit) || 0;
+    if (quantityPerUnit <= 0) return fail(res, new Error("BOM quantity per unit must be greater than zero"), 400);
+    const quantityUom = bomUomForIngredient(ingredient.name);
+    await run(
+      "UPDATE product_formulas SET ingredient_id = ?, quantity_per_unit = ?, quantity_uom = ?, notes = ? WHERE id = ?",
+      [ingredientId, quantityPerUnit, quantityUom, req.body.notes ?? existing.notes ?? null, req.params.id],
+    );
+    await regenerateRecommendations();
+    ok(res, { id: Number(req.params.id), ingredient_id: ingredientId, quantity_per_unit: quantityPerUnit, quantity_uom: quantityUom });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.delete("/api/formulas/:id", async (req, res) => {
+  try {
+    const result = await run("DELETE FROM product_formulas WHERE id = ? AND source_sheet IS NULL", [req.params.id]);
+    if (!result.changes) return fail(res, new Error("BOM ingredient not found"), 404);
+    await regenerateRecommendations();
+    ok(res, { id: Number(req.params.id) });
   } catch (error) {
     fail(res, error);
   }

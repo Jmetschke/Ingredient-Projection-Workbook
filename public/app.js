@@ -121,6 +121,20 @@ function table(headers, rows, options = {}) {
   return `<div class="table-wrap"><table><thead><tr>${headers.map((h) => `<th class="${h.numeric ? "numeric" : ""}">${h.label}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
+function setMessage(selector, text, kind = "") {
+  const el = document.querySelector(selector);
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = `form-message ${kind}`.trim();
+}
+
+function optionList(items, selected, labelFn = (item) => item.name, valueFn = (item) => item.id) {
+  return items.map((item) => {
+    const value = String(valueFn(item));
+    return `<option value="${escapeHtml(value)}" ${String(selected) === value ? "selected" : ""}>${escapeHtml(labelFn(item))}</option>`;
+  }).join("");
+}
+
 async function loadReference() {
   [state.products, state.ingredients, state.weeks] = await Promise.all([
     api("/api/products"),
@@ -165,7 +179,6 @@ async function renderDashboard() {
 
 async function renderProduction() {
   const data = await api("/api/production-plan");
-  const plan = new Map(data.plan.map((p) => [`${p.product_id}:${p.week_id}`, p]));
   const batchForm = document.querySelector("#production-batch-form");
   const batchTypeSelect = batchForm.querySelector("select[name='batch_type']");
   const productSelect = batchForm.querySelector("select[name='product_id']");
@@ -183,8 +196,6 @@ async function renderProduction() {
   if (!state.productionEndWeek) state.productionEndWeek = defaultWeeks.at(-1)?.week_start || weeks.at(-1)?.week_start || "";
   const filteredWeeks = weeks.filter((week) => (!state.productionStartWeek || week.week_start >= state.productionStartWeek)
     && (!state.productionEndWeek || week.week_start <= state.productionEndWeek));
-  const products = data.products.filter((product) => !state.productionBatchType || product.category === state.productionBatchType);
-  const rows = filteredRows(products, ["name"]);
   const filteredBatches = data.batches.filter((batch) => (!state.productionBatchType || batch.batch_type === state.productionBatchType)
     && (!state.productionStartWeek || batch.week_start >= state.productionStartWeek)
     && (!state.productionEndWeek || batch.week_start <= state.productionEndWeek));
@@ -231,13 +242,19 @@ async function renderProduction() {
   batchTypeSelect.onchange = fillProductionProducts;
   batchForm.onsubmit = async (event) => {
     event.preventDefault();
-    const form = new FormData(batchForm);
-    await api("/api/production-batches", {
-      method: "POST",
-      body: JSON.stringify(Object.fromEntries(form.entries())),
-    });
-    batchForm.querySelector("input[name='quantity']").value = "";
-    await renderProduction();
+    setMessage("#production-message", "Adding batch...");
+    try {
+      const form = new FormData(batchForm);
+      await api("/api/production-batches", {
+        method: "POST",
+        body: JSON.stringify(Object.fromEntries(form.entries())),
+      });
+      batchForm.querySelector("input[name='quantity']").value = "";
+      setMessage("#production-message", "Batch added.", "success");
+      await renderProduction();
+    } catch (error) {
+      setMessage("#production-message", error.message, "error");
+    }
   };
 
   renderProductionCalendar(filteredBatches, filteredWeeks);
@@ -248,22 +265,8 @@ async function renderProduction() {
     { label: "Products", numeric: true, key: "product_count" },
   ], filteredRows(ingredientReport.rows || [], ["ingredient_name", "quantity_uom"]));
 
-  const html = `<div class="table-wrap"><table><thead><tr><th>Batch Type</th><th>Product</th>${filteredWeeks.map((w) => `<th class="numeric">W${w.weekNumber}<br>${w.week_start}</th>`).join("")}</tr></thead><tbody>${
-    rows.map((product) => `<tr><td>${escapeHtml(product.category || "")}</td><td>${escapeHtml(product.name)}</td>${filteredWeeks.map((week) => {
-      const entry = plan.get(`${product.id}:${week.id}`);
-      return `<td class="numeric">${qty(entry?.planned_qty || 0)}</td>`;
-    }).join("")}</tr>`).join("")
-  }</tbody></table></div>`;
-  document.querySelector("#production-table").innerHTML = html;
-  document.querySelector("#production-batches").innerHTML = table([
-    { label: "Created", key: "created_at" },
-    { label: "Week", key: "week_start" },
-    { label: "Batch Type", key: "batch_type" },
-    { label: "Product", key: "product_name" },
-    { label: "Quantity", numeric: true, value: (r) => qty(r.quantity) },
-  ], filteredRows((data.recentBatches || data.batches).filter((batch) => (!state.productionBatchType || batch.batch_type === state.productionBatchType)
-    && (!state.productionStartWeek || batch.week_start >= state.productionStartWeek)
-    && (!state.productionEndWeek || batch.week_start <= state.productionEndWeek)), ["week_start", "batch_type", "product_name"]));
+  renderProductionTotals(filteredBatches, filteredWeeks);
+  renderProductionBatchEditor(filteredBatches, data.products, weeks, data.batchTypes);
 }
 
 function productionReportQuery() {
@@ -273,6 +276,114 @@ function productionReportQuery() {
   if (state.productionEndWeek) params.set("end", state.productionEndWeek);
   const query = params.toString();
   return query ? `?${query}` : "";
+}
+
+function renderProductionTotals(batches, weeks) {
+  const rows = weeks.map((week) => {
+    const scheduled = batches.filter((batch) => String(batch.week_id) === String(week.id));
+    const hijnx = scheduled.filter((batch) => batch.batch_type === "Hijnx").reduce((sum, batch) => sum + Number(batch.quantity || 0), 0);
+    const snackbar = scheduled.filter((batch) => batch.batch_type === "Snackbar").reduce((sum, batch) => sum + Number(batch.quantity || 0), 0);
+    return {
+      week: `W${week.weekNumber}`,
+      date_range: week.label.replace(/^Week \d+ \((.*)\)$/, "$1"),
+      batch_count: scheduled.length,
+      hijnx,
+      snackbar,
+      total: hijnx + snackbar,
+    };
+  }).filter((row) => row.batch_count || row.total);
+  document.querySelector("#production-table").innerHTML = table([
+    { label: "Week", key: "week" },
+    { label: "Date Range", key: "date_range" },
+    { label: "Batches", numeric: true, key: "batch_count" },
+    { label: "Hijnx", numeric: true, value: (row) => qty(row.hijnx) },
+    { label: "SB", numeric: true, value: (row) => qty(row.snackbar) },
+    { label: "Total", numeric: true, value: (row) => qty(row.total) },
+  ], rows);
+}
+
+function productionBatchEditorRow(batch, products, weeks, batchTypes) {
+  const matchingProducts = products.filter((product) => product.category === batch.batch_type);
+  return `
+    <tr data-batch-id="${batch.id}">
+      <td>
+        <select class="batch-edit-type" aria-label="Batch type">
+          ${optionList(batchTypes.map((type) => ({ id: type, name: type })), batch.batch_type)}
+        </select>
+      </td>
+      <td>
+        <select class="batch-edit-product" aria-label="Product">
+          ${optionList(matchingProducts, batch.product_id)}
+        </select>
+      </td>
+      <td>
+        <select class="batch-edit-week" aria-label="Production week">
+          ${optionList(weeks, batch.week_id, (week) => week.label)}
+        </select>
+      </td>
+      <td><input class="batch-edit-quantity" aria-label="Quantity" type="number" min="1" step="1" value="${escapeHtml(batch.quantity)}"></td>
+      <td class="row-actions">
+        <button class="small secondary save-batch" type="button">Save</button>
+        <button class="small danger delete-batch" type="button">Delete</button>
+      </td>
+    </tr>
+  `;
+}
+
+function renderProductionBatchEditor(batches, products, weeks, batchTypes) {
+  const rows = filteredRows(batches, ["week_start", "batch_type", "product_name"]);
+  const html = rows.length ? `
+    <div class="table-wrap editor-table-wrap">
+      <table class="editor-table">
+        <thead><tr><th>Type</th><th>Product</th><th>Week</th><th class="numeric">Qty</th><th>Actions</th></tr></thead>
+        <tbody>${rows.map((batch) => productionBatchEditorRow(batch, products, weeks, batchTypes)).join("")}</tbody>
+      </table>
+    </div>
+  ` : `<div class="empty-calendar">No scheduled batches in this filter.</div>`;
+  document.querySelector("#production-batches").innerHTML = html;
+  document.querySelectorAll(".batch-edit-type").forEach((select) => {
+    select.addEventListener("change", () => {
+      const row = select.closest("tr");
+      const productSelect = row.querySelector(".batch-edit-product");
+      const matchingProducts = products.filter((product) => product.category === select.value);
+      productSelect.innerHTML = optionList(matchingProducts, matchingProducts[0]?.id);
+    });
+  });
+  document.querySelectorAll(".save-batch").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      setMessage("#production-message", "Saving batch...");
+      try {
+        await api(`/api/production-batches/${row.dataset.batchId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            batch_type: row.querySelector(".batch-edit-type").value,
+            product_id: row.querySelector(".batch-edit-product").value,
+            week_id: row.querySelector(".batch-edit-week").value,
+            quantity: row.querySelector(".batch-edit-quantity").value,
+          }),
+        });
+        setMessage("#production-message", "Batch saved.", "success");
+        await renderProduction();
+      } catch (error) {
+        setMessage("#production-message", error.message, "error");
+      }
+    });
+  });
+  document.querySelectorAll(".delete-batch").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      if (!confirm("Delete this scheduled batch?")) return;
+      setMessage("#production-message", "Deleting batch...");
+      try {
+        await api(`/api/production-batches/${row.dataset.batchId}`, { method: "DELETE" });
+        setMessage("#production-message", "Batch deleted.", "success");
+        await renderProduction();
+      } catch (error) {
+        setMessage("#production-message", error.message, "error");
+      }
+    });
+  });
 }
 
 function visibleCalendarWeeks(weeks, monthCount) {
@@ -512,11 +623,7 @@ async function renderFormulas() {
   updateFormulaUomDisplay();
 
   const selectedFormulas = data.formulas.filter((formula) => String(formula.product_id) === String(state.selectedFormulaProductId));
-  document.querySelector("#formula-table").innerHTML = table([
-    { label: "Ingredient", key: "ingredient_name" },
-    { label: "Qty / Unit", numeric: true, value: (r) => qty(r.quantity_per_unit) },
-    { label: "UOM", key: "quantity_uom" },
-  ], filteredRows(selectedFormulas, ["ingredient_name"]));
+  renderFormulaEditor(selectedFormulas);
 }
 
 function updateFormulaUomDisplay() {
@@ -524,6 +631,73 @@ function updateFormulaUomDisplay() {
   const display = document.querySelector("#formula-uom-display");
   if (!select || !display) return;
   display.value = select.selectedOptions[0]?.dataset.uom || "grams";
+}
+
+function renderFormulaEditor(formulas) {
+  const rows = filteredRows(formulas, ["ingredient_name", "quantity_uom"]);
+  const masterIngredients = state.ingredients.filter((ingredient) => Number(ingredient.is_master));
+  const html = rows.length ? `
+    <div class="table-wrap editor-table-wrap">
+      <table class="editor-table">
+        <thead><tr><th>Ingredient</th><th class="numeric">Qty / Unit</th><th>UOM</th><th>Actions</th></tr></thead>
+        <tbody>${rows.map((formula) => `
+          <tr data-formula-id="${formula.id}">
+            <td>
+              <select class="formula-edit-ingredient" aria-label="Ingredient">
+                ${optionList(masterIngredients, formula.ingredient_id)}
+              </select>
+            </td>
+            <td><input class="formula-edit-quantity" aria-label="Quantity per unit" type="number" min="0.000001" step="0.000001" value="${escapeHtml(formula.quantity_per_unit)}"></td>
+            <td class="formula-row-uom">${escapeHtml(formula.quantity_uom || "grams")}</td>
+            <td class="row-actions">
+              <button class="small secondary save-formula" type="button">Save</button>
+              <button class="small danger delete-formula" type="button">Delete</button>
+            </td>
+          </tr>
+        `).join("")}</tbody>
+      </table>
+    </div>
+  ` : `<div class="empty-calendar">No BOM ingredients for this batch.</div>`;
+  document.querySelector("#formula-table").innerHTML = html;
+  document.querySelectorAll(".formula-edit-ingredient").forEach((select) => {
+    select.addEventListener("change", () => {
+      const ingredient = state.ingredients.find((item) => String(item.id) === String(select.value));
+      select.closest("tr").querySelector(".formula-row-uom").textContent = ingredient?.bom_uom || "grams";
+    });
+  });
+  document.querySelectorAll(".save-formula").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      setMessage("#formula-message", "Saving BOM ingredient...");
+      try {
+        await api(`/api/formulas/${row.dataset.formulaId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            ingredient_id: row.querySelector(".formula-edit-ingredient").value,
+            quantity_per_unit: row.querySelector(".formula-edit-quantity").value,
+          }),
+        });
+        setMessage("#formula-message", "BOM ingredient saved.", "success");
+        await renderFormulas();
+      } catch (error) {
+        setMessage("#formula-message", error.message, "error");
+      }
+    });
+  });
+  document.querySelectorAll(".delete-formula").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      if (!confirm("Delete this BOM ingredient?")) return;
+      setMessage("#formula-message", "Deleting BOM ingredient...");
+      try {
+        await api(`/api/formulas/${row.dataset.formulaId}`, { method: "DELETE" });
+        setMessage("#formula-message", "BOM ingredient deleted.", "success");
+        await renderFormulas();
+      } catch (error) {
+        setMessage("#formula-message", error.message, "error");
+      }
+    });
+  });
 }
 
 const renderers = {
@@ -583,12 +757,18 @@ document.querySelector("#formula-form").addEventListener("submit", async (event)
   const formEl = event.currentTarget;
   const form = new FormData(formEl);
   if (!form.get("product_id")) return;
-  await api("/api/formulas", {
-    method: "POST",
-    body: JSON.stringify(Object.fromEntries(form.entries())),
-  });
-  formEl.querySelector("input[name='quantity_per_unit']").value = "";
-  await renderFormulas();
+  setMessage("#formula-message", "Saving BOM ingredient...");
+  try {
+    await api("/api/formulas", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(form.entries())),
+    });
+    formEl.querySelector("input[name='quantity_per_unit']").value = "";
+    setMessage("#formula-message", "BOM ingredient saved.", "success");
+    await renderFormulas();
+  } catch (error) {
+    setMessage("#formula-message", error.message, "error");
+  }
 });
 
 loadReference().then(() => activate("dashboard")).catch((error) => {

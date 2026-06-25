@@ -119,6 +119,23 @@ button, .export-buttons a, .button-link {
   justify-content: center;
 }
 
+button.small {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+button.secondary {
+  background: #eef5f4;
+  border-color: #9bbcb7;
+  color: #174d46;
+}
+
+button.danger {
+  background: var(--danger-bg);
+  border-color: #e2a39d;
+  color: var(--danger);
+}
+
 .view {
   display: none;
 }
@@ -246,7 +263,7 @@ tr.warning td {
   display: grid;
   grid-template-columns: repeat(4, minmax(130px, 1fr)) minmax(120px, auto);
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
   align-items: end;
 }
 
@@ -258,6 +275,23 @@ tr.warning td {
 .form-field span, .compact-field span {
   color: var(--muted);
   font-size: 12px;
+  font-weight: 700;
+}
+
+.form-message {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  margin: -2px 0 8px;
+}
+
+.form-message.success {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.form-message.error {
+  color: var(--danger);
   font-weight: 700;
 }
 
@@ -541,6 +575,38 @@ tr.warning td {
   align-items: end;
 }
 
+.production-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.editor-table-wrap {
+  max-height: 520px;
+}
+
+.editor-table {
+  min-width: 560px;
+}
+
+.editor-table input,
+.editor-table select {
+  width: 100%;
+  padding: 7px 8px;
+}
+
+.editor-table td {
+  vertical-align: middle;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+
 .bom-layout {
   display: grid;
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
@@ -623,7 +689,7 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .bom-layout, .bom-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .production-workspace, .bom-layout, .bom-form {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -639,5 +705,22 @@ pre {
   .rl-calendar-head {
     align-items: flex-start;
     display: grid;
+  }
+
+  section {
+    padding: 12px;
+  }
+
+  .section-head {
+    align-items: flex-start;
+    display: grid;
+  }
+
+  .table-wrap {
+    max-height: 58vh;
+  }
+
+  .editor-table {
+    min-width: 620px;
   }
 }

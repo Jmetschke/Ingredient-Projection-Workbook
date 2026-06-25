@@ -52,7 +52,7 @@
       <section id="production" class="view">
         <div class="section-head">
           <h2>Add Production Batch</h2>
-          <span>Editable input</span>
+          <span>Calendar entries drive projections</span>
         </div>
         <form id="production-batch-form" class="inline-form">
           <label class="form-field">
@@ -73,6 +73,7 @@
           </label>
           <button>Add Batch</button>
         </form>
+        <div id="production-message" class="form-message"></div>
         <div class="section-head">
           <h2>Scheduled Production Calendar</h2>
         </div>
@@ -103,16 +104,23 @@
           </label>
           <a id="production-ingredient-export" class="button-link" href="/api/export/production-ingredients">Export Ingredient Report</a>
         </div>
-        <div id="production-calendar"></div>
-        <h2>Ingredient Needs For Filtered Production</h2>
-        <div id="production-ingredient-report"></div>
+        <div class="production-workspace">
+          <div id="production-calendar"></div>
+          <div>
+            <div class="section-head">
+              <h2>Scheduled Batches</h2>
+              <span>Edit or remove entries</span>
+            </div>
+            <div id="production-batches"></div>
+          </div>
+        </div>
         <div class="section-head">
-          <h2>Weekly Production Quantities</h2>
+          <h2>Weekly Production Totals</h2>
           <span>Scheduled batches</span>
         </div>
         <div id="production-table"></div>
-        <h2>Recent Batches</h2>
-        <div id="production-batches"></div>
+        <h2>Ingredient Needs For Filtered Production</h2>
+        <div id="production-ingredient-report"></div>
       </section>
 
       <section id="rl-scheduled-batches" class="view">
@@ -192,6 +200,7 @@
               </label>
               <button>Add / Update</button>
             </form>
+            <div id="formula-message" class="form-message"></div>
             <div id="formula-table"></div>
           </div>
         </div>
