@@ -125,6 +125,7 @@ export const MASTER_INGREDIENTS = [
 export const EACH_UOM_INGREDIENTS = new Set([
   "Bottle - AM Tinc",
   "Bottle - PM Tinc",
+  "Whoppie Cookie",
   "Pump Caps",
   "Pouch - AM Tinc",
   "Pouch - PM Tinc",

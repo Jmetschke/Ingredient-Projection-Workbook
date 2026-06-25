@@ -127,11 +127,13 @@ export async function ensureMasterProducts() {
 export async function ensureMasterIngredients() {
   for (const name of MASTER_INGREDIENTS) {
     const existing = await one("SELECT id FROM ingredients WHERE name = ?", [name]);
+    const isEachIngredient = EACH_UOM_INGREDIENTS.has(name);
     if (existing) {
       await run(
         `UPDATE ingredients
          SET is_master = 1,
              purchase_uom = CASE
+               WHEN ? = 1 THEN 'each'
                WHEN lower(COALESCE(purchase_uom, '')) = 'each' THEN 'each'
                WHEN lower(COALESCE(purchase_uom, '')) IN ('gram', 'grams') THEN 'grams'
                ELSE ?
@@ -142,12 +144,12 @@ export async function ensureMasterIngredients() {
              END,
              active = 1
          WHERE id = ?`,
-        [EACH_UOM_INGREDIENTS.has(name) ? "each" : "grams", existing.id],
+        [isEachIngredient ? 1 : 0, isEachIngredient ? "each" : "grams", existing.id],
       );
     } else {
       await run(
         "INSERT INTO ingredients (name, purchase_uom, ingredient_type, is_master, active) VALUES (?, ?, 'SB/Hijnx', 1, 1)",
-        [name, EACH_UOM_INGREDIENTS.has(name) ? "each" : "grams"],
+        [name, isEachIngredient ? "each" : "grams"],
       );
     }
   }
