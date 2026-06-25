@@ -25,6 +25,7 @@ const titles = {
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
+    cache: "no-store",
     headers: options.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
     ...options,
   });
@@ -687,7 +688,11 @@ async function renderInventory() {
 }
 
 async function renderFormulas() {
-  const data = await api("/api/formulas");
+  await refreshFormulaManager();
+}
+
+async function refreshFormulaManager() {
+  const data = await api(`/api/formulas?_=${Date.now()}`);
   const batches = data.products;
   if (!state.selectedFormulaProductId && batches.length) {
     state.selectedFormulaProductId = String(batches[0].id);
@@ -772,7 +777,7 @@ function renderFormulaEditor(formulas) {
           }),
         });
         setMessage("#formula-message", "BOM ingredient saved.", "success");
-        await renderFormulas();
+        await refreshFormulaManager();
       } catch (error) {
         setMessage("#formula-message", error.message, "error");
       }
@@ -786,7 +791,7 @@ function renderFormulaEditor(formulas) {
       try {
         await api(`/api/formulas/${row.dataset.formulaId}`, { method: "DELETE" });
         setMessage("#formula-message", "BOM ingredient deleted.", "success");
-        await renderFormulas();
+        await refreshFormulaManager();
       } catch (error) {
         setMessage("#formula-message", error.message, "error");
       }
@@ -858,7 +863,7 @@ document.querySelector("#formula-form").addEventListener("submit", async (event)
     });
     formEl.querySelector("input[name='quantity_per_unit']").value = "";
     setMessage("#formula-message", "BOM ingredient saved.", "success");
-    await renderFormulas();
+    await refreshFormulaManager();
   } catch (error) {
     setMessage("#formula-message", error.message, "error");
   }
