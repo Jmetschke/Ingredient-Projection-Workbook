@@ -8,6 +8,7 @@ const state = {
   productionStartWeek: "",
   productionEndWeek: "",
   rlCalendarMonths: 6,
+  forecastMonths: 6,
   selectedFormulaProductId: "",
 };
 
@@ -17,7 +18,7 @@ const titles = {
   dashboard: ["Dashboard", "Inventory warnings, upcoming production, and purchase timing."],
   production: ["Production Planner", "Schedule batches and calculate ingredient needs from calendar entries."],
   "rl-scheduled-batches": ["RL Scheduled Batches", "Read-only calendar from the RL scheduling database."],
-  forecast: ["Ingredient Forecast", "Projected usage, receipts, ending inventory, and shortages."],
+  forecast: ["Ingredient Forecast", "Scheduled BOM usage totals from Production Planner batches."],
   inventory: ["Inventory", "Add new items to the master inventory list."],
   formulas: ["Formula Manager", "Batch-level BOM setup using grams and each."],
 };
@@ -150,8 +151,6 @@ function fillSelects() {
   const ingredientOptions = masterIngredients.map((i) => `<option value="${i.id}" data-uom="${escapeHtml(i.bom_uom || "grams")}">${escapeHtml(i.name)}</option>`).join("");
   document.querySelectorAll("select[name='product_id']").forEach((el) => { el.innerHTML = productOptions; });
   document.querySelectorAll("select[name='ingredient_id']").forEach((el) => { el.innerHTML = ingredientOptions; });
-  const filter = document.querySelector("#ingredient-filter");
-  filter.innerHTML = `<option value="">All ingredients</option>${state.ingredients.map((i) => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("")}`;
 }
 
 async function renderDashboard() {
@@ -570,17 +569,23 @@ async function renderRlScheduledBatches() {
 }
 
 async function renderForecast() {
-  const selected = document.querySelector("#ingredient-filter").value;
-  const data = await api(`/api/forecast${selected ? `?ingredient=${selected}` : ""}`);
+  const monthsSelect = document.querySelector("#forecast-months");
+  monthsSelect.value = String(state.forecastMonths);
+  monthsSelect.onchange = async () => {
+    state.forecastMonths = Number(monthsSelect.value) || 6;
+    await renderForecast();
+  };
+  const data = await api(`/api/forecast?months=${state.forecastMonths}`);
+  document.querySelector("#forecast-window").textContent = `${data.filters.start} through ${data.filters.end}`;
   document.querySelector("#forecast-table").innerHTML = table([
-    { label: "Week", key: "week_start" },
     { label: "Ingredient", key: "ingredient_name" },
-    { label: "Beginning", numeric: true, value: (r) => qty(r.beginning_qty) },
-    { label: "Received", numeric: true, value: (r) => qty(r.received_qty) },
-    { label: "Usage", numeric: true, value: (r) => qty(r.required_usage) },
-    { label: "Ending", numeric: true, value: (r) => qty(r.ending_qty), className: (r) => r.shortage ? "shortage" : "" },
-    { label: "Threshold", numeric: true, value: (r) => qty(r.reorder_threshold) },
-  ], filteredRows(data.rows, ["ingredient_name", "week_start"]), { rowClass: (r) => r.shortage ? "warning" : "" });
+    { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
+    { label: "UOM", key: "quantity_uom" },
+    { label: "Batches", numeric: true, key: "scheduled_batches" },
+    { label: "Products", key: "products" },
+    { label: "First Week", key: "first_week" },
+    { label: "Last Week", key: "last_week" },
+  ], filteredRows(data.rows || [], ["ingredient_name", "quantity_uom", "products"]));
 }
 
 async function renderInventory() {
@@ -733,7 +738,6 @@ document.querySelector("#global-filter").addEventListener("input", async (event)
   await activate(document.querySelector("#tabs button.active").dataset.tab);
 });
 
-document.querySelector("#ingredient-filter").addEventListener("change", renderForecast);
 document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);
 
 document.querySelector("#inventory-item-form").addEventListener("submit", async (event) => {

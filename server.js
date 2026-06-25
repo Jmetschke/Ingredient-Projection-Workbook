@@ -235,6 +235,69 @@ async function productionIngredientReport(query = {}) {
   };
 }
 
+function forecastDateWindow(months = 6) {
+  const today = new Date();
+  const start = mondayForDate(today);
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + months);
+  return {
+    start: localIsoDate(start),
+    end: localIsoDate(end),
+  };
+}
+
+async function scheduledIngredientUsageForecast(query = {}) {
+  const monthCount = [6, 9, 12].includes(Number(query.months)) ? Number(query.months) : 6;
+  const { start, end } = forecastDateWindow(monthCount);
+  const rows = await all(`
+    SELECT i.id AS ingredient_id,
+           i.name AS ingredient_name,
+           COALESCE(pf.quantity_uom, 'grams') AS quantity_uom,
+           SUM(pb.quantity * COALESCE(pf.quantity_per_unit, 0)) AS required_qty,
+           COUNT(DISTINCT pb.id) AS scheduled_batches,
+           COUNT(DISTINCT p.id) AS product_count,
+           GROUP_CONCAT(DISTINCT p.name) AS products,
+           MIN(w.week_start) AS first_week,
+           MAX(w.week_start) AS last_week
+    FROM production_batches pb
+    JOIN weeks w ON w.id = pb.week_id
+    JOIN products p ON p.id = pb.product_id
+    JOIN product_formulas pf ON pf.product_id = pb.product_id AND pf.source_sheet IS NULL
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE pb.quantity > 0
+      AND w.week_start >= @start
+      AND w.week_start < @end
+    GROUP BY i.id, COALESCE(pf.quantity_uom, 'grams')
+    HAVING required_qty > 0
+    ORDER BY i.name, quantity_uom
+  `, { start, end });
+  const detail = await all(`
+    SELECT w.week_start,
+           pb.batch_type,
+           p.name AS product_name,
+           pb.quantity AS batch_qty,
+           i.id AS ingredient_id,
+           i.name AS ingredient_name,
+           COALESCE(pf.quantity_uom, 'grams') AS quantity_uom,
+           COALESCE(pf.quantity_per_unit, 0) AS quantity_per_unit,
+           pb.quantity * COALESCE(pf.quantity_per_unit, 0) AS required_qty
+    FROM production_batches pb
+    JOIN weeks w ON w.id = pb.week_id
+    JOIN products p ON p.id = pb.product_id
+    JOIN product_formulas pf ON pf.product_id = pb.product_id AND pf.source_sheet IS NULL
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE pb.quantity > 0
+      AND w.week_start >= @start
+      AND w.week_start < @end
+    ORDER BY w.week_start, i.name, p.name
+  `, { start, end });
+  return {
+    filters: { months: monthCount, start, end },
+    rows,
+    detail,
+  };
+}
+
 app.get("/api/health", async (req, res) => {
   try {
     const check = await one("SELECT 1 AS ok");
@@ -564,12 +627,7 @@ app.delete("/api/production-batches/:id", async (req, res) => {
 
 app.get("/api/forecast", async (req, res) => {
   try {
-    const forecast = await calculateForecast();
-    const ingredient = req.query.ingredient;
-    const rows = ingredient
-      ? forecast.rows.filter((row) => String(row.ingredient_id) === String(ingredient))
-      : forecast.rows;
-    ok(res, { ...forecast, rows });
+    ok(res, await scheduledIngredientUsageForecast(req.query));
   } catch (error) {
     fail(res, error);
   }

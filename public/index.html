@@ -137,10 +137,20 @@
 
       <section id="forecast" class="view">
         <div class="section-head">
-          <h2>Ingredient Forecast</h2>
-          <span>Calculated output</span>
+          <h2>Scheduled Ingredient Usage</h2>
+          <span>Production Planner BOM totals</span>
         </div>
-        <select id="ingredient-filter"></select>
+        <div class="forecast-tools">
+          <label class="form-field">
+            <span>Time Period</span>
+            <select id="forecast-months">
+              <option value="6">6 months</option>
+              <option value="9">9 months</option>
+              <option value="12">12 months</option>
+            </select>
+          </label>
+          <div id="forecast-window" class="source-note"></div>
+        </div>
         <div id="forecast-table"></div>
       </section>
 

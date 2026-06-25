@@ -580,6 +580,13 @@ tr.warning td {
   align-items: end;
 }
 
+.forecast-tools {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
 .production-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.85fr);
@@ -694,7 +701,7 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .production-workspace, .bom-layout, .bom-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .production-workspace, .bom-layout, .bom-form {
     grid-template-columns: 1fr;
     display: grid;
   }
