@@ -11,6 +11,7 @@ const state = {
   forecastMonths: 6,
   selectedFormulaProductId: "",
 };
+let filterRenderTimer;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -522,15 +523,15 @@ function renderProductionCalendar(batches, weeks) {
 }
 
 async function renderRlScheduledBatches() {
-  const data = await api("/api/rl-scheduled-batches");
+  const days = rlCalendarDays();
+  const firstDay = days[0];
+  const lastDay = days.at(-1);
+  const data = await api(`/api/rl-scheduled-batches?start=${isoDate(firstDay)}&end=${isoDate(lastDay)}`);
 
   document.querySelector("#rl-calendar-status").textContent = data.source
     ? `Read only source: ${data.source.table}`
     : (data.message || "Read only source is not available.");
 
-  const days = rlCalendarDays();
-  const firstDay = days[0];
-  const lastDay = days.at(-1);
   const batchesByDay = new Map();
   (data.batches || []).forEach((batch) => {
     const date = parseIsoDate(batch.scheduled_date);
@@ -847,9 +848,12 @@ document.querySelector("#refresh").addEventListener("click", async () => {
   await activate(document.querySelector("#tabs button.active").dataset.tab);
 });
 
-document.querySelector("#global-filter").addEventListener("input", async (event) => {
+document.querySelector("#global-filter").addEventListener("input", (event) => {
   state.filter = event.target.value;
-  await activate(document.querySelector("#tabs button.active").dataset.tab);
+  clearTimeout(filterRenderTimer);
+  filterRenderTimer = setTimeout(() => {
+    activate(document.querySelector("#tabs button.active").dataset.tab);
+  }, 250);
 });
 
 document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);

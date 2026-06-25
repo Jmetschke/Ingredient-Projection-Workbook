@@ -5,7 +5,6 @@ import express from "express";
 import XLSX from "xlsx";
 import { all, one, run } from "./src/db.js";
 import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
-import { calculateForecast, regenerateRecommendations, weekIdForDate } from "./src/forecast.js";
 import { BATCH_TYPES } from "./src/master-products.js";
 import { bomUomForIngredient } from "./src/master-ingredients.js";
 
@@ -14,6 +13,9 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const INGREDIENT_TYPES = new Set(["SB", "Hijnx", "SB/Hijnx"]);
+let calendarSchemaCache = { expiresAt: 0, schema: null };
+let forwardWeeksEnsuredKey = "";
+let forwardWeeksEnsurePromise = null;
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.resolve("public")));
@@ -173,16 +175,51 @@ function mondayForDate(date = new Date()) {
   return addDateDays(date, -daysSinceMonday);
 }
 
+function sundayForDate(date = new Date()) {
+  return addDateDays(date, -date.getDay());
+}
+
+function dateWindowFromQuery(query = {}, days = 42) {
+  const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
+  const start = isoPattern.test(String(query.start || "")) ? String(query.start) : localIsoDate(sundayForDate(new Date()));
+  const end = isoPattern.test(String(query.end || "")) ? String(query.end) : localIsoDate(addDateDays(new Date(`${start}T00:00:00`), days - 1));
+  return { start, end };
+}
+
+async function cachedCalendarSchema() {
+  const now = Date.now();
+  if (calendarSchemaCache.schema && calendarSchemaCache.expiresAt > now) {
+    return calendarSchemaCache.schema;
+  }
+  const schema = await calendarSchema();
+  calendarSchemaCache = { schema, expiresAt: now + 5 * 60 * 1000 };
+  return schema;
+}
+
 async function ensureForwardWeeks(count = 78) {
   const start = mondayForDate(new Date());
-  for (let index = 0; index < count; index += 1) {
-    const weekStart = localIsoDate(addDateDays(start, index * 7));
-    await run(
-      `INSERT INTO weeks (week_start, label)
-       VALUES (?, ?)
-       ON CONFLICT(week_start) DO NOTHING`,
-      [weekStart, weekStart],
-    );
+  const key = `${localIsoDate(start)}:${count}`;
+  if (forwardWeeksEnsuredKey === key) return;
+  if (forwardWeeksEnsurePromise) {
+    await forwardWeeksEnsurePromise;
+    if (forwardWeeksEnsuredKey === key) return;
+  }
+  forwardWeeksEnsurePromise = (async () => {
+    for (let index = 0; index < count; index += 1) {
+      const weekStart = localIsoDate(addDateDays(start, index * 7));
+      await run(
+        `INSERT INTO weeks (week_start, label)
+         VALUES (?, ?)
+         ON CONFLICT(week_start) DO NOTHING`,
+        [weekStart, weekStart],
+      );
+    }
+    forwardWeeksEnsuredKey = key;
+  })();
+  try {
+    await forwardWeeksEnsurePromise;
+  } finally {
+    forwardWeeksEnsurePromise = null;
   }
 }
 
@@ -407,6 +444,7 @@ app.post("/api/ingredients", async (req, res) => {
 
 app.get("/api/rl-scheduled-batches", async (req, res) => {
   try {
+    const dateWindow = dateWindowFromQuery(req.query);
     if (!calendarDbConfigured) {
       return ok(res, {
         configured: false,
@@ -416,7 +454,7 @@ app.get("/api/rl-scheduled-batches", async (req, res) => {
         message: "TURSO_CALENDAR_URL and TURSO_CALENDAR_TOKEN are not configured.",
       });
     }
-    const schema = await calendarSchema();
+    const schema = await cachedCalendarSchema();
     const table = selectRlBatchSource(schema);
     if (!table) {
       return ok(res, {
@@ -431,8 +469,9 @@ app.get("/api/rl-scheduled-batches", async (req, res) => {
       const rows = await calendarAll(`
         SELECT schedule_date, tasks, updated_at
         FROM ${quoteIdentifier(table.name)}
+        WHERE schedule_date >= ? AND schedule_date <= ?
         ORDER BY schedule_date
-      `);
+      `, [dateWindow.start, dateWindow.end]);
       return ok(res, {
         configured: true,
         source: {
@@ -492,7 +531,12 @@ app.get("/api/rl-scheduled-batches", async (req, res) => {
       });
     }
     const orderColumn = quoteIdentifier(source.dateColumns[0]);
-    const rows = await calendarAll(`SELECT * FROM ${quoteIdentifier(table.name)} ORDER BY ${orderColumn}`);
+    const rows = await calendarAll(`
+      SELECT *
+      FROM ${quoteIdentifier(table.name)}
+      WHERE ${orderColumn} >= ? AND ${orderColumn} <= ?
+      ORDER BY ${orderColumn}
+    `, [dateWindow.start, dateWindow.end]);
     ok(res, {
       configured: true,
       source,
@@ -531,7 +575,6 @@ app.patch("/api/ingredients/:id", async (req, res) => {
     }
     const sets = Object.keys(fields).map((key) => `${key} = @${key}`).join(", ");
     await run(`UPDATE ingredients SET ${sets} WHERE id = @id`, { ...fields, id: req.params.id });
-    await regenerateRecommendations();
     ok(res, withBomUom(await one(`
       SELECT id, name, purchase_uom, ingredient_type, is_master, active
       FROM ingredients
@@ -600,7 +643,6 @@ app.post("/api/production-batches", async (req, res) => {
        VALUES (?, ?, ?, ?, ?)`,
       [batch_type, product_id, week_id, qty, notes || null],
     );
-    await regenerateRecommendations();
     ok(res, { id: info.lastInsertRowid, batch_type, product_id, week_id, quantity: qty });
   } catch (error) {
     fail(res, error);
@@ -630,7 +672,6 @@ app.patch("/api/production-batches/:id", async (req, res) => {
        WHERE id = ?`,
       [batchType, productId, weekId, qty, notes || null, req.params.id],
     );
-    await regenerateRecommendations();
     ok(res, { id: Number(req.params.id), batch_type: batchType, product_id: productId, week_id: weekId, quantity: qty });
   } catch (error) {
     fail(res, error);
@@ -641,7 +682,6 @@ app.delete("/api/production-batches/:id", async (req, res) => {
   try {
     const result = await run("DELETE FROM production_batches WHERE id = ?", [req.params.id]);
     if (!result.changes) return fail(res, new Error("Scheduled batch not found"), 404);
-    await regenerateRecommendations();
     ok(res, { id: Number(req.params.id) });
   } catch (error) {
     fail(res, error);
@@ -709,7 +749,6 @@ app.post("/api/formulas", async (req, res) => {
         [product_id, ingredient_id, quantityPerUnit, quantityUom, notes || null],
       );
     }
-    await regenerateRecommendations();
     ok(res, { product_id, ingredient_id });
   } catch (error) {
     fail(res, error);
@@ -749,7 +788,6 @@ app.post("/api/formulas/copy", async (req, res) => {
         [target_product_id, formula.ingredient_id, formula.quantity_per_unit, formula.quantity_uom, formula.notes || null],
       );
     }
-    await regenerateRecommendations();
     ok(res, {
       source_product_id: Number(source_product_id),
       target_product_id: Number(target_product_id),
@@ -785,7 +823,6 @@ app.patch("/api/formulas/:id", async (req, res) => {
       "UPDATE product_formulas SET ingredient_id = ?, quantity_per_unit = ?, quantity_uom = ?, notes = ? WHERE id = ?",
       [ingredientId, quantityPerUnit, quantityUom, req.body.notes ?? existing.notes ?? null, req.params.id],
     );
-    await regenerateRecommendations();
     ok(res, { id: Number(req.params.id), ingredient_id: ingredientId, quantity_per_unit: quantityPerUnit, quantity_uom: quantityUom });
   } catch (error) {
     fail(res, error);
@@ -796,24 +833,7 @@ app.delete("/api/formulas/:id", async (req, res) => {
   try {
     const result = await run("DELETE FROM product_formulas WHERE id = ? AND source_sheet IS NULL", [req.params.id]);
     if (!result.changes) return fail(res, new Error("BOM ingredient not found"), 404);
-    await regenerateRecommendations();
     ok(res, { id: Number(req.params.id) });
-  } catch (error) {
-    fail(res, error);
-  }
-});
-
-app.post("/api/receiving", async (req, res) => {
-  try {
-    const { ingredient_id, date, week_id, quantity_received, notes } = req.body;
-    const targetWeekId = week_id || await weekIdForDate(date);
-    await run(
-      `INSERT INTO received_inventory (ingredient_id, week_id, quantity_received, notes)
-       VALUES (?, ?, ?, ?)`,
-      [ingredient_id, targetWeekId, Number(quantity_received) || 0, notes || null],
-    );
-    await regenerateRecommendations();
-    ok(res, { ingredient_id, week_id: targetWeekId, quantity_received: Number(quantity_received) || 0 });
   } catch (error) {
     fail(res, error);
   }
