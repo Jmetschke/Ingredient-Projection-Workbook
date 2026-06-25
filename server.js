@@ -329,35 +329,32 @@ app.get("/api/health", async (req, res) => {
 
 app.get("/api/summary", async (req, res) => {
   try {
-    const forecast = await calculateForecast();
-    const shortages = forecast.rows.filter((r) => r.shortage).slice(0, 12);
+    const ingredientUsage = await scheduledIngredientUsageForecast({ months: 6 });
+    const dashboardStart = localIsoDate(mondayForDate(new Date()));
+    const dashboardEnd = localIsoDate(addDateDays(mondayForDate(new Date()), 24 * 7));
     ok(res, {
       counts: {
         products: (await one("SELECT COUNT(*) AS n FROM products"))?.n || 0,
         ingredients: (await one("SELECT COUNT(*) AS n FROM ingredients"))?.n || 0,
-        formulas: (await one("SELECT COUNT(*) AS n FROM product_formulas"))?.n || 0,
-        weeks: (await one("SELECT COUNT(*) AS n FROM weeks"))?.n || 0,
+        scheduled_batches: (await one("SELECT COUNT(*) AS n FROM production_batches WHERE quantity > 0"))?.n || 0,
       },
-      upcomingProduction: await all(`
-        SELECT w.week_start, pb.batch_type, p.name AS product_name, SUM(pb.quantity) AS planned_qty
+      ingredientUsage,
+      productionWeeks: await all(`
+        SELECT id, week_start, label
+        FROM weeks
+        WHERE week_start >= @start AND week_start < @end
+        ORDER BY week_start
+      `, { start: dashboardStart, end: dashboardEnd }),
+      productionBatches: await all(`
+        SELECT pb.id, pb.week_id, w.week_start, pb.batch_type, p.name AS product_name, pb.quantity
         FROM production_batches pb
         JOIN products p ON p.id = pb.product_id
         JOIN weeks w ON w.id = pb.week_id
         WHERE pb.quantity > 0
-        GROUP BY w.id, pb.batch_type, p.id
+          AND w.week_start >= @start
+          AND w.week_start < @end
         ORDER BY w.week_start, pb.batch_type, p.name
-        LIMIT 20
-      `),
-      shortages,
-      nextOrders: await all(`
-        SELECT pr.*, i.name AS ingredient_name, ow.week_start AS order_week, nw.week_start AS needed_week
-        FROM purchasing_recommendations pr
-        JOIN ingredients i ON i.id = pr.ingredient_id
-        JOIN weeks ow ON ow.id = pr.order_week_id
-        JOIN weeks nw ON nw.id = pr.needed_week_id
-        ORDER BY ow.week_start, i.name
-        LIMIT 20
-      `),
+      `, { start: dashboardStart, end: dashboardEnd }),
     });
   } catch (error) {
     fail(res, error);

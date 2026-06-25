@@ -155,25 +155,71 @@ function fillSelects() {
 
 async function renderDashboard() {
   const data = await api("/api/summary");
+  const kpiLabels = {
+    products: "Products",
+    ingredients: "Ingredients",
+    scheduled_batches: "Scheduled Batches",
+  };
   document.querySelector("#kpis").innerHTML = Object.entries(data.counts).map(([key, value]) => `
-    <div class="kpi"><strong>${value}</strong><span>${key.replace(/^\w/, (c) => c.toUpperCase())}</span></div>
+    <div class="kpi"><strong>${value}</strong><span>${kpiLabels[key] || key}</span></div>
   `).join("");
-  document.querySelector("#next-orders").innerHTML = table([
-    { label: "Order Week", key: "order_week" },
+  document.querySelector("#dashboard-ingredient-usage").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
-    { label: "Qty", key: "recommended_qty", numeric: true, value: (r) => qty(r.recommended_qty) },
-    { label: "Cost", key: "estimated_cost", numeric: true, value: (r) => money(r.estimated_cost) },
-  ], filteredRows(data.nextOrders, ["ingredient_name", "order_week"]));
-  document.querySelector("#shortages").innerHTML = table([
-    { label: "Week", key: "week_start" },
-    { label: "Ingredient", key: "ingredient_name" },
-    { label: "Ending", key: "ending_qty", numeric: true, value: (r) => qty(r.ending_qty), className: () => "shortage" },
-  ], filteredRows(data.shortages, ["ingredient_name", "week_start"]));
-  document.querySelector("#upcoming-production").innerHTML = table([
-    { label: "Week", key: "week_start" },
-    { label: "Product", key: "product_name" },
-    { label: "Planned Qty", key: "planned_qty", numeric: true, value: (r) => qty(r.planned_qty) },
-  ], filteredRows(data.upcomingProduction, ["product_name", "week_start"]));
+    { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
+    { label: "UOM", key: "quantity_uom" },
+    { label: "Batches", numeric: true, key: "scheduled_batches" },
+    { label: "Products", key: "products" },
+    { label: "First Week", key: "first_week" },
+    { label: "Last Week", key: "last_week" },
+  ], filteredRows(data.ingredientUsage?.rows || [], ["ingredient_name", "quantity_uom", "products"]));
+  renderDashboardProductionCalendar(data.productionBatches || [], (data.productionWeeks || []).map(weekMeta));
+}
+
+function renderDashboardProductionCalendar(batches, weeks) {
+  const batchesByWeek = new Map();
+  batches.forEach((batch) => {
+    const key = String(batch.week_id);
+    if (!batchesByWeek.has(key)) batchesByWeek.set(key, []);
+    batchesByWeek.get(key).push(batch);
+  });
+  const groups = [];
+  for (let index = 0; index < weeks.length; index += 4) {
+    groups.push(weeks.slice(index, index + 4));
+  }
+  const html = groups.map((group) => {
+    const first = group[0];
+    const last = group.at(-1);
+    const label = first && last ? `${dateLabel(first.blockStart)} - ${dateLabel(last.blockEnd, true)}` : "";
+    return `
+      <div class="dashboard-month-block">
+        <h3>${escapeHtml(label)}</h3>
+        <div class="dashboard-week-grid">
+          ${group.map((week) => {
+            const scheduled = batchesByWeek.get(String(week.id)) || [];
+            return `
+              <article class="week-card dashboard-week-card">
+                <div class="week-card-head">
+                  <strong>Week ${week.weekNumber}</strong>
+                  <span>${escapeHtml(week.week_start)}</span>
+                </div>
+                <div class="week-range">${escapeHtml(week.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</div>
+                <div class="week-batches">
+                  ${scheduled.length ? scheduled.map((batch) => `
+                    <div class="batch-chip">
+                      <span>${escapeHtml(batch.batch_type)}</span>
+                      <strong>${escapeHtml(batch.product_name)}</strong>
+                      <em>${qty(batch.quantity)}</em>
+                    </div>
+                  `).join("") : `<span class="empty-week">No batches</span>`}
+                </div>
+              </article>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+  document.querySelector("#dashboard-production-calendar").innerHTML = html || `<div class="empty-calendar">No production weeks found.</div>`;
 }
 
 async function renderProduction() {

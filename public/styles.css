@@ -190,6 +190,31 @@ section {
   font-size: 13px;
 }
 
+#dashboard-production-calendar {
+  display: grid;
+  gap: 14px;
+}
+
+.dashboard-month-block {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-month-block h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.dashboard-week-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.dashboard-week-card {
+  min-height: 150px;
+}
+
 .table-wrap {
   overflow: auto;
   max-height: 68vh;
@@ -708,6 +733,10 @@ pre {
 
   .kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-week-grid {
+    grid-template-columns: 1fr;
   }
 
   .rl-summary-cards {
