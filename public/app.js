@@ -530,6 +530,7 @@ async function renderRlScheduledBatches() {
             return `
               <div class="rl-event ${category}" title="${escapeHtml(`${title}${quantity}`)}">
                 <strong>${escapeHtml(title)}</strong>
+                ${quantity ? `<span class="rl-event-quantity">${escapeHtml(quantity.replace(/^ - /, ""))}</span>` : ""}
                 ${category === "hijnx" || category === "sb" ? `
                   <div class="rl-completion">
                     <span>Completion</span>
@@ -561,7 +562,8 @@ async function renderRlScheduledBatches() {
       { label: "Scheduled Date", key: "scheduled_date" },
       { label: "Batch Type", key: "batch_type" },
       { label: "Product", key: "product_name" },
-      { label: "Quantity", numeric: true, value: (row) => row.quantity == null ? "" : qty(row.quantity) },
+      { label: "Quantity", numeric: true, value: (row) => row.quantity == null ? "" : `${qty(row.quantity)} ${escapeHtml(row.quantity_uom || "")}` },
+      { label: "Completion", numeric: true, value: (row) => row.completion == null ? "" : `${qty(row.completion)}%` },
       { label: "Status", key: "status" },
     ], filteredRows(data.batches || [], ["scheduled_date", "batch_type", "product_name", "status"]));
   }

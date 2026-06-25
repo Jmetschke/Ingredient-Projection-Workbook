@@ -451,6 +451,11 @@ tr.warning td {
   overflow-wrap: anywhere;
 }
 
+.rl-event-quantity {
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .rl-event.hijnx { background: #e9fff4; border-color: #8cf0bf; color: #126e50; }
 .rl-event.sb { background: #eaf8ff; border-color: #9bd9fb; color: #126da0; }
 .rl-event.pickup { background: #fff0f2; border-color: #ffb8c4; color: #c9274e; }

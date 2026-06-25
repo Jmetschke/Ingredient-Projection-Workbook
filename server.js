@@ -98,6 +98,49 @@ function normalizeRlBatch(row, source) {
   };
 }
 
+function completionFromChecklist(checklist = {}) {
+  const values = Object.values(checklist || {});
+  if (!values.length) return null;
+  const completed = values.filter(Boolean).length;
+  return Math.round((completed / values.length) * 100);
+}
+
+function parseRlScheduleTasks(row) {
+  let tasks;
+  try {
+    tasks = JSON.parse(row.tasks || "{}");
+  } catch {
+    return [];
+  }
+  const groups = [
+    { key: "batchHijnx", batchType: "Hijnx", category: "hijnx" },
+    { key: "batchSb", batchType: "SB", category: "sb" },
+  ];
+  return groups.flatMap((group) => {
+    const entries = Array.isArray(tasks[group.key]) ? tasks[group.key] : [];
+    return entries.map((entry, index) => ({
+      id: `${row.schedule_date}:${group.key}:${index}:${entry.item || ""}`,
+      scheduled_date: row.schedule_date,
+      product_name: entry.item || "",
+      title: entry.item || "",
+      batch_type: group.batchType,
+      category: group.category,
+      quantity: entry.units ?? "",
+      quantity_uom: "units",
+      completion: completionFromChecklist(entry.checklist),
+      status: "",
+      notes: "",
+      raw: entry,
+    }));
+  });
+}
+
+function isScheduleDaysSource(table) {
+  return table?.name === "schedule_days"
+    && table.columns.includes("schedule_date")
+    && table.columns.includes("tasks");
+}
+
 function localIsoDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -308,6 +351,27 @@ app.get("/api/rl-scheduled-batches", async (req, res) => {
         schema,
         batches: [],
         message: "No likely scheduled batch table was found in the RL calendar database.",
+      });
+    }
+    if (isScheduleDaysSource(table)) {
+      const rows = await calendarAll(`
+        SELECT schedule_date, tasks, updated_at
+        FROM ${quoteIdentifier(table.name)}
+        ORDER BY schedule_date
+      `);
+      return ok(res, {
+        configured: true,
+        source: {
+          table: table.name,
+          mode: "schedule_days_json",
+          dateColumns: ["schedule_date"],
+          taskColumn: "tasks",
+          batchArrays: ["batchHijnx", "batchSb"],
+          productField: "item",
+          quantityField: "units",
+        },
+        schema,
+        batches: rows.flatMap(parseRlScheduleTasks),
       });
     }
     const source = {
