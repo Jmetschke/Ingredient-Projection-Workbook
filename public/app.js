@@ -722,7 +722,29 @@ async function refreshFormulaManager() {
   updateFormulaUomDisplay();
 
   const selectedFormulas = data.formulas.filter((formula) => String(formula.product_id) === String(state.selectedFormulaProductId));
+  updateFormulaCopyForm(batches, data.formulas, selectedFormulas);
   renderFormulaEditor(selectedFormulas);
+}
+
+function updateFormulaCopyForm(products, formulas, selectedFormulas) {
+  const form = document.querySelector("#formula-copy-form");
+  const select = form.querySelector("select[name='source_product_id']");
+  const target = form.querySelector("input[name='target_product_id']");
+  target.value = state.selectedFormulaProductId || "";
+  form.dataset.hasBom = selectedFormulas.length ? "1" : "";
+  const options = products
+    .map((product) => {
+      const count = formulas.filter((formula) => String(formula.product_id) === String(product.id)).length;
+      return { ...product, count };
+    })
+    .filter((product) => product.count > 0 && String(product.id) !== String(state.selectedFormulaProductId));
+  select.innerHTML = options.length
+    ? options.map((product) => (
+      `<option value="${product.id}">${escapeHtml(product.name)} (${product.count})</option>`
+    )).join("")
+    : `<option value="">No BOMs available to copy</option>`;
+  select.disabled = !options.length || !state.selectedFormulaProductId;
+  form.querySelector("button").disabled = select.disabled;
 }
 
 function updateFormulaUomDisplay() {
@@ -863,6 +885,25 @@ document.querySelector("#formula-form").addEventListener("submit", async (event)
     });
     formEl.querySelector("input[name='quantity_per_unit']").value = "";
     setMessage("#formula-message", "BOM ingredient saved.", "success");
+    await refreshFormulaManager();
+  } catch (error) {
+    setMessage("#formula-message", error.message, "error");
+  }
+});
+
+document.querySelector("#formula-copy-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formEl = event.currentTarget;
+  const form = new FormData(formEl);
+  if (!form.get("source_product_id") || !form.get("target_product_id")) return;
+  if (formEl.dataset.hasBom && !confirm("Replace this product BOM with the copied BOM?")) return;
+  setMessage("#formula-message", "Copying BOM...");
+  try {
+    const copied = await api("/api/formulas/copy", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(form.entries())),
+    });
+    setMessage("#formula-message", `Copied ${copied.copied} BOM ingredients.`, "success");
     await refreshFormulaManager();
   } catch (error) {
     setMessage("#formula-message", error.message, "error");

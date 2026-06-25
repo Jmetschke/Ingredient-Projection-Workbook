@@ -690,6 +690,11 @@ tr.warning td {
   grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) minmax(90px, 110px) minmax(120px, auto);
 }
 
+.bom-copy-form {
+  grid-template-columns: minmax(220px, 1fr) minmax(120px, auto);
+  margin-bottom: 12px;
+}
+
 .stack-form {
   display: grid;
   gap: 8px;

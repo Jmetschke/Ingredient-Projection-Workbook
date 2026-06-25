@@ -201,6 +201,14 @@
               <h2 id="formula-focus-title">Select a batch</h2>
               <span id="formula-focus-meta"></span>
             </div>
+            <form id="formula-copy-form" class="inline-form bom-copy-form">
+              <input name="target_product_id" type="hidden">
+              <label class="form-field">
+                <span>Copy BOM From</span>
+                <select name="source_product_id"></select>
+              </label>
+              <button type="submit">Copy BOM</button>
+            </form>
             <form id="formula-form" class="inline-form bom-form">
               <input name="product_id" type="hidden">
               <label class="form-field">

@@ -716,6 +716,50 @@ app.post("/api/formulas", async (req, res) => {
   }
 });
 
+app.post("/api/formulas/copy", async (req, res) => {
+  try {
+    const { source_product_id, target_product_id } = req.body;
+    if (!source_product_id || !target_product_id) {
+      return fail(res, new Error("Select a source and target production batch"), 400);
+    }
+    if (String(source_product_id) === String(target_product_id)) {
+      return fail(res, new Error("Select a different batch to copy from"), 400);
+    }
+    const sourceProduct = await one("SELECT * FROM products WHERE id = ? AND category IN ('Hijnx', 'Snackbar')", [source_product_id]);
+    const targetProduct = await one("SELECT * FROM products WHERE id = ? AND category IN ('Hijnx', 'Snackbar')", [target_product_id]);
+    if (!sourceProduct || !targetProduct) {
+      return fail(res, new Error("Select valid production batches"), 400);
+    }
+    const sourceFormulas = await all(`
+      SELECT ingredient_id, quantity_per_unit, quantity_uom, notes
+      FROM product_formulas
+      WHERE product_id = ? AND source_sheet IS NULL
+      ORDER BY id
+    `, [source_product_id]);
+    if (!sourceFormulas.length) {
+      return fail(res, new Error("The selected batch does not have a BOM to copy"), 400);
+    }
+
+    await run("DELETE FROM product_formulas WHERE product_id = ? AND source_sheet IS NULL", [target_product_id]);
+    for (const formula of sourceFormulas) {
+      await run(
+        `INSERT INTO product_formulas
+          (product_id, ingredient_id, quantity_per_unit, quantity_uom, notes)
+         VALUES (?, ?, ?, ?, ?)`,
+        [target_product_id, formula.ingredient_id, formula.quantity_per_unit, formula.quantity_uom, formula.notes || null],
+      );
+    }
+    await regenerateRecommendations();
+    ok(res, {
+      source_product_id: Number(source_product_id),
+      target_product_id: Number(target_product_id),
+      copied: sourceFormulas.length,
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
 app.patch("/api/formulas/:id", async (req, res) => {
   try {
     const existing = await one(`
