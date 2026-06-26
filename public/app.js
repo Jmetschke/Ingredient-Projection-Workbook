@@ -16,6 +16,7 @@ const state = {
   velocityRows: [],
   velocityInstructions: [],
   velocityProducts: [],
+  velocitySchedulePreview: null,
   selectedFormulaProductId: "",
   selectedProductionWeekId: "",
 };
@@ -809,6 +810,17 @@ function velocityRowForProduct(product) {
   return state.velocityRows.find((row) => String(row.product_id) === String(product.id));
 }
 
+function velocityProjection(product) {
+  const weeks = Math.max(1, Number(state.velocityWeeks) || 1);
+  const imported = velocityRowForProduct(product);
+  const velocity = Number(imported?.velocity_per_day || 0);
+  const batchSize = Number(product.batch_size || 0);
+  return {
+    velocity_per_day: imported ? velocity : null,
+    batches_needed: imported && batchSize > 0 ? (velocity * weeks * 7) / batchSize : null,
+  };
+}
+
 async function renderVelocity() {
   const data = await api("/api/velocity-products");
   state.velocityProducts = data.products || [];
@@ -817,6 +829,11 @@ async function renderVelocity() {
   weeksInput.oninput = () => {
     state.velocityWeeks = Math.max(1, Number(weeksInput.value) || 1);
     renderVelocityTable(state.velocityProducts);
+    renderVelocityScheduler(state.velocityProducts);
+    const form = document.querySelector("#velocity-schedule-form");
+    const product = state.velocityProducts.find((item) => String(item.id) === String(form.querySelector("select[name='product_id']").value));
+    const projection = product ? velocityProjection(product) : null;
+    form.querySelector("input[name='batch_count']").value = projection?.batches_needed == null ? "" : String(Math.ceil(projection.batches_needed));
   };
   document.querySelector("#velocity-instructions").innerHTML = state.velocityInstructions.length
     ? `<ul>${state.velocityInstructions.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
@@ -830,20 +847,19 @@ async function renderVelocity() {
     .map((product) => `<option value="${product.id}">${escapeHtml(product.category)} - ${escapeHtml(product.name)}</option>`)
     .join("");
   renderVelocityTable(state.velocityProducts);
+  renderVelocityScheduler(state.velocityProducts);
   renderVelocitySizeEditor(state.velocityProducts);
 }
 
 function renderVelocityTable(products) {
-  const weeks = Math.max(1, Number(state.velocityWeeks) || 1);
   const rows = products.map((product) => {
-    const imported = velocityRowForProduct(product);
-    const velocity = Number(imported?.velocity_per_day || 0);
-    const batchSize = Number(product.batch_size || 0);
+    const projection = velocityProjection(product);
     return {
+      product_id: product.id,
       product_name: product.name,
       batch_type: product.category,
-      velocity_per_day: imported ? velocity : null,
-      batches_needed: imported && batchSize > 0 ? (velocity * weeks * 7) / batchSize : null,
+      velocity_per_day: projection.velocity_per_day,
+      batches_needed: projection.batches_needed,
     };
   });
   document.querySelector("#velocity-table").innerHTML = table([
@@ -851,7 +867,215 @@ function renderVelocityTable(products) {
     { label: "Type", value: (row) => escapeHtml(row.batch_type) },
     { label: "Vel / Day", numeric: true, value: (row) => row.velocity_per_day == null ? "" : qty(row.velocity_per_day) },
     { label: "Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : qty(row.batches_needed) },
+    { label: "Actions", value: (row) => `<button class="small secondary velocity-use-schedule" type="button" data-product-id="${row.product_id}">Schedule</button>` },
   ], filteredRows(rows, ["product_name", "batch_type"]));
+  document.querySelectorAll(".velocity-use-schedule").forEach((button) => {
+    button.addEventListener("click", () => {
+      const product = products.find((item) => String(item.id) === String(button.dataset.productId));
+      if (!product) return;
+      const projection = velocityProjection(product);
+      const form = document.querySelector("#velocity-schedule-form");
+      form.querySelector("select[name='product_id']").value = String(product.id);
+      form.querySelector("input[name='batch_count']").value = projection.batches_needed == null ? "" : String(Math.ceil(projection.batches_needed));
+      form.querySelector("input[name='quantity']").value = Number(product.batch_size || 0) > 0 ? String(product.batch_size) : "";
+      state.velocitySchedulePreview = null;
+      setMessage("#velocity-schedule-message", "Review the schedule window, then preview.", "success");
+      document.querySelector("#velocity-schedule-confirm").disabled = true;
+      document.querySelector("#velocity-schedule-preview").innerHTML = "";
+    });
+  });
+}
+
+function velocityScheduleWeekOptions() {
+  const weeks = state.weeks.map(weekMeta);
+  const rollingStart = nextProductionWeekStartIso();
+  return weeks.filter((week) => week.week_start >= rollingStart);
+}
+
+function evenlySpacedWeeks(weeks, count) {
+  if (!weeks.length || count <= 0) return [];
+  if (count === 1) return [weeks[0]];
+  if (count <= weeks.length) {
+    return Array.from({ length: count }, (_, index) => {
+      const weekIndex = Math.round((index * (weeks.length - 1)) / (count - 1));
+      return weeks[weekIndex];
+    });
+  }
+  return Array.from({ length: count }, (_, index) => {
+    const weekIndex = Math.min(weeks.length - 1, Math.floor((index * weeks.length) / count));
+    return weeks[weekIndex];
+  });
+}
+
+async function velocitySchedulePlan(form) {
+  const productId = form.querySelector("select[name='product_id']").value;
+  const product = state.velocityProducts.find((item) => String(item.id) === String(productId));
+  const targetCount = Math.max(0, Math.round(Number(form.querySelector("input[name='batch_count']").value) || 0));
+  const quantity = Number(form.querySelector("input[name='quantity']").value) || 0;
+  const startWeek = form.querySelector("select[name='start_week']").value;
+  const endWeek = form.querySelector("select[name='end_week']").value;
+  if (!product) throw new Error("Select a production batch.");
+  if (targetCount < 1) throw new Error("Batches needed must be at least 1.");
+  if (quantity <= 0) throw new Error("Qty per batch must be greater than zero.");
+  if (!startWeek || !endWeek || endWeek < startWeek) throw new Error("Select a valid schedule window.");
+
+  const production = await api("/api/production-plan");
+  const weeks = production.weeks.map(weekMeta).filter((week) => week.week_start >= startWeek && week.week_start <= endWeek);
+  if (!weeks.length) throw new Error("No production weeks found in that schedule window.");
+  const existing = production.batches.filter((batch) => String(batch.product_id) === String(product.id)
+    && batch.week_start >= startWeek
+    && batch.week_start <= endWeek);
+  const missingCount = Math.max(0, targetCount - existing.length);
+  const overCount = Math.max(0, existing.length - targetCount);
+  const proposed = evenlySpacedWeeks(weeks, missingCount).map((week) => ({
+    week_id: week.id,
+    week_start: week.week_start,
+    label: week.label,
+    batch_type: product.category,
+    product_id: product.id,
+    product_name: product.name,
+    quantity,
+  }));
+  return { product, targetCount, quantity, startWeek, endWeek, weeks, existing, missingCount, overCount, proposed };
+}
+
+function renderVelocitySchedulePreview(plan) {
+  const canSchedule = plan.proposed.length > 0 && plan.overCount === 0;
+  document.querySelector("#velocity-schedule-confirm").disabled = !canSchedule;
+  const warning = plan.overCount > 0
+    ? `<div class="form-message error">This window is over the velocity target by ${plan.overCount} batch entr${plan.overCount === 1 ? "y" : "ies"}. Delete ${plan.overCount} entr${plan.overCount === 1 ? "y" : "ies"} before adding more.</div>`
+    : plan.missingCount === 0
+      ? `<div class="form-message success">This window already matches the velocity target.</div>`
+      : `<div class="form-message success">${plan.proposed.length} batch entr${plan.proposed.length === 1 ? "y" : "ies"} ready to add.</div>`;
+  const existingRows = plan.existing.map((batch) => `
+    <tr data-batch-id="${batch.id}">
+      <td>${escapeHtml(batch.week_start)}</td>
+      <td>${escapeHtml(batch.product_name)}</td>
+      <td class="numeric">${qty(batch.quantity)}</td>
+      <td>${plan.overCount > 0 ? `<button class="small danger delete-velocity-existing" type="button">Delete</button>` : ""}</td>
+    </tr>
+  `).join("");
+  const proposedRows = plan.proposed.map((batch) => `
+    <tr>
+      <td>${escapeHtml(batch.label)}</td>
+      <td>${escapeHtml(batch.product_name)}</td>
+      <td class="numeric">${qty(batch.quantity)}</td>
+    </tr>
+  `).join("");
+  document.querySelector("#velocity-schedule-preview").innerHTML = `
+    ${warning}
+    <div class="velocity-schedule-summary">
+      <div><strong>${plan.targetCount}</strong><span>Target Entries</span></div>
+      <div><strong>${plan.existing.length}</strong><span>Already Scheduled</span></div>
+      <div><strong>${plan.proposed.length}</strong><span>Will Add</span></div>
+      <div><strong>${plan.overCount}</strong><span>Over Target</span></div>
+    </div>
+    <div class="grid two">
+      <div>
+        <h3>Existing Planner Entries</h3>
+        <div class="table-wrap velocity-schedule-table">
+          <table><thead><tr><th>Week</th><th>Batch</th><th class="numeric">Qty</th><th>Actions</th></tr></thead><tbody>${existingRows || `<tr><td colspan="4">No existing entries</td></tr>`}</tbody></table>
+        </div>
+      </div>
+      <div>
+        <h3>Proposed New Entries</h3>
+        <div class="table-wrap velocity-schedule-table">
+          <table><thead><tr><th>Week</th><th>Batch</th><th class="numeric">Qty</th></tr></thead><tbody>${proposedRows || `<tr><td colspan="3">No new entries needed</td></tr>`}</tbody></table>
+        </div>
+      </div>
+    </div>
+  `;
+  document.querySelectorAll(".delete-velocity-existing").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      if (!confirm("Delete this scheduled batch entry?")) return;
+      setMessage("#velocity-schedule-message", "Deleting scheduled batch...");
+      try {
+        await api(`/api/production-batches/${row.dataset.batchId}`, { method: "DELETE" });
+        setMessage("#velocity-schedule-message", "Scheduled batch deleted. Rebuilding preview...", "success");
+        state.velocitySchedulePreview = await velocitySchedulePlan(document.querySelector("#velocity-schedule-form"));
+        renderVelocitySchedulePreview(state.velocitySchedulePreview);
+      } catch (error) {
+        setMessage("#velocity-schedule-message", error.message, "error");
+      }
+    });
+  });
+}
+
+function renderVelocityScheduler(products) {
+  const form = document.querySelector("#velocity-schedule-form");
+  const productSelect = form.querySelector("select[name='product_id']");
+  const startSelect = form.querySelector("select[name='start_week']");
+  const endSelect = form.querySelector("select[name='end_week']");
+  const quantityInput = form.querySelector("input[name='quantity']");
+  const weeks = velocityScheduleWeekOptions();
+  const previousProduct = productSelect.value;
+  const previousStart = startSelect.value;
+  const previousEnd = endSelect.value;
+  productSelect.innerHTML = products.map((product) => `<option value="${product.id}">${escapeHtml(product.category)} - ${escapeHtml(product.name)}</option>`).join("");
+  const weekOptions = weeks.map((week) => `<option value="${week.week_start}">${escapeHtml(week.label)}</option>`).join("");
+  startSelect.innerHTML = weekOptions;
+  endSelect.innerHTML = weekOptions;
+  if (previousProduct && products.some((product) => String(product.id) === String(previousProduct))) productSelect.value = previousProduct;
+  if (previousStart && weeks.some((week) => week.week_start === previousStart)) startSelect.value = previousStart;
+  if (previousEnd && weeks.some((week) => week.week_start === previousEnd)) {
+    endSelect.value = previousEnd;
+  } else if (weeks.length) {
+    endSelect.value = weeks[Math.min(weeks.length - 1, Math.max(0, state.velocityWeeks - 1))].week_start;
+  }
+  const updateProductDefaults = () => {
+    const product = products.find((item) => String(item.id) === String(productSelect.value));
+    if (!product) return;
+    const projection = velocityProjection(product);
+    form.querySelector("input[name='batch_count']").value = projection.batches_needed == null ? "" : String(Math.ceil(projection.batches_needed));
+    quantityInput.value = Number(product.batch_size || 0) > 0 ? String(product.batch_size) : "";
+    state.velocitySchedulePreview = null;
+    document.querySelector("#velocity-schedule-confirm").disabled = true;
+    document.querySelector("#velocity-schedule-preview").innerHTML = "";
+  };
+  productSelect.onchange = updateProductDefaults;
+  if (!quantityInput.value) updateProductDefaults();
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    setMessage("#velocity-schedule-message", "Building schedule preview...");
+    try {
+      state.velocitySchedulePreview = await velocitySchedulePlan(form);
+      renderVelocitySchedulePreview(state.velocitySchedulePreview);
+      setMessage("#velocity-schedule-message", "Preview ready.", "success");
+    } catch (error) {
+      state.velocitySchedulePreview = null;
+      document.querySelector("#velocity-schedule-confirm").disabled = true;
+      document.querySelector("#velocity-schedule-preview").innerHTML = "";
+      setMessage("#velocity-schedule-message", error.message, "error");
+    }
+  };
+  document.querySelector("#velocity-schedule-confirm").onclick = async () => {
+    const plan = state.velocitySchedulePreview;
+    if (!plan?.proposed?.length) return;
+    setMessage("#velocity-schedule-message", "Adding scheduled batches...");
+    try {
+      for (const batch of plan.proposed) {
+        await api("/api/production-batches", {
+          method: "POST",
+          body: JSON.stringify({
+            batch_type: batch.batch_type,
+            product_id: batch.product_id,
+            week_id: batch.week_id,
+            quantity: batch.quantity,
+            notes: `Auto scheduled from velocity target of ${plan.targetCount} batches between ${plan.startWeek} and ${plan.endWeek}.`,
+          }),
+        });
+      }
+      state.velocitySchedulePreview = await velocitySchedulePlan(form);
+      renderVelocitySchedulePreview(state.velocitySchedulePreview);
+      const overMessage = state.velocitySchedulePreview.overCount > 0
+        ? ` Added entries, but this window is now over target by ${state.velocitySchedulePreview.overCount}.`
+        : "";
+      setMessage("#velocity-schedule-message", `Added ${plan.proposed.length} scheduled batch entr${plan.proposed.length === 1 ? "y" : "ies"}.${overMessage}`, "success");
+    } catch (error) {
+      setMessage("#velocity-schedule-message", error.message, "error");
+    }
+  };
 }
 
 function renderVelocitySizeEditor(products) {

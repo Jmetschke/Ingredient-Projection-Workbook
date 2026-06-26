@@ -190,6 +190,36 @@
         <div id="velocity-instructions" class="source-note"></div>
         <div id="velocity-table"></div>
         <div class="section-head">
+          <h2>Auto Schedule From Velocity</h2>
+          <span>Spread needed batches evenly across a selected production window</span>
+        </div>
+        <form id="velocity-schedule-form" class="inline-form velocity-schedule-form">
+          <label class="form-field">
+            <span>Production Batch</span>
+            <select name="product_id" required></select>
+          </label>
+          <label class="form-field">
+            <span>Batches Needed</span>
+            <input name="batch_count" type="number" min="0" step="1" required>
+          </label>
+          <label class="form-field">
+            <span>Qty Per Batch</span>
+            <input name="quantity" type="number" min="1" step="1" required>
+          </label>
+          <label class="form-field">
+            <span>Start Week</span>
+            <select name="start_week" required></select>
+          </label>
+          <label class="form-field">
+            <span>End Week</span>
+            <select name="end_week" required></select>
+          </label>
+          <button type="submit">Preview</button>
+          <button id="velocity-schedule-confirm" class="secondary" type="button" disabled>Confirm Schedule</button>
+        </form>
+        <div id="velocity-schedule-message" class="form-message"></div>
+        <div id="velocity-schedule-preview"></div>
+        <div class="section-head">
           <h2>Standard Batch Sizes</h2>
           <span>Edit the unit count used to calculate batches needed</span>
         </div>

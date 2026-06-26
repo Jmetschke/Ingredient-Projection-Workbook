@@ -644,6 +644,39 @@ tr.warning td {
   grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) minmax(120px, auto);
 }
 
+.velocity-schedule-form {
+  grid-template-columns: minmax(220px, 1.2fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(100px, auto) minmax(150px, auto);
+}
+
+.velocity-schedule-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.velocity-schedule-summary div {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+}
+
+.velocity-schedule-summary strong {
+  font-size: 22px;
+}
+
+.velocity-schedule-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.velocity-schedule-table {
+  max-height: 300px;
+}
+
 .velocity-size-table-wrap {
   max-height: 320px;
 }
@@ -863,7 +896,7 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .production-workspace, .bom-layout, .bom-form, .production-week-add-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .production-week-add-form {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -889,6 +922,10 @@ pre {
   }
 
   .rl-summary-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .velocity-schedule-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
