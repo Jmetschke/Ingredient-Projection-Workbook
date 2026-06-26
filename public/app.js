@@ -128,7 +128,7 @@ function table(headers, rows, options = {}) {
     return `<tr class="${klass}">${headers.map((header) => {
       const raw = typeof header.value === "function" ? header.value(row) : row[header.key];
       const cellClass = [header.numeric ? "numeric" : "", header.className?.(row) || ""].filter(Boolean).join(" ");
-      return `<td class="${cellClass}">${raw ?? ""}</td>`;
+      return `<td class="${cellClass}" data-label="${escapeHtml(header.label)}">${raw ?? ""}</td>`;
     }).join("")}</tr>`;
   }).join("") : `<tr><td colspan="${headers.length}">No rows</td></tr>`;
   return `<div class="table-wrap"><table><thead><tr>${headers.map((h) => `<th class="${h.numeric ? "numeric" : ""}">${h.label}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
@@ -1330,6 +1330,7 @@ async function activate(tab) {
   document.querySelector("#page-title").textContent = titles[tab][0];
   document.querySelector("#page-subtitle").textContent = titles[tab][1];
   await renderers[tab]();
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 document.querySelector("#tabs").addEventListener("click", async (event) => {
