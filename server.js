@@ -5,7 +5,7 @@ import express from "express";
 import XLSX from "xlsx";
 import { all, one, run } from "./src/db.js";
 import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
-import { BATCH_TYPES } from "./src/master-products.js";
+import { BATCH_TYPES, PRODUCT_ALIASES } from "./src/master-products.js";
 import { bomUomForIngredient } from "./src/master-ingredients.js";
 
 dotenv.config();
@@ -41,6 +41,118 @@ function normalizeIngredientUom(value, name = "") {
 function normalizeIngredientType(value) {
   const raw = String(value || "").trim();
   return INGREDIENT_TYPES.has(raw) ? raw : "SB/Hijnx";
+}
+
+function normalizeMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(oz|g|gram|grams|unit|units|pcs|piece|pieces|pack|packs)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pdfText(value = "") {
+  return value
+    .replace(/\\([()\\])/g, "$1")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r")
+    .replace(/\\t/g, "\t")
+    .trim();
+}
+
+function extractPdfTextItems(buffer) {
+  const lines = buffer.toString("latin1").split(/\r?\n/);
+  const items = [];
+  let currentX = 0;
+  let currentY = 0;
+  let lastY = 0;
+  let page = 0;
+  let sawRowText = false;
+  for (const line of lines) {
+    const td = line.match(/^\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+Td\s*$/);
+    if (td) {
+      currentX = Number(td[1]);
+      currentY = Number(td[2]);
+      if (sawRowText && currentY > lastY + 80) page += 1;
+      lastY = currentY;
+      continue;
+    }
+    const text = line.match(/^\s*\((.*)\)\s*Tj\s*$/);
+    const continuedText = line.match(/^\s*T\*\s*\((.*)\)\s*Tj\s*$/);
+    if (!text && !continuedText) continue;
+    const value = pdfText((text || continuedText)[1]);
+    if (!value) continue;
+    sawRowText = true;
+    items.push({ page, x: currentX, y: currentY, text: value });
+  }
+  return items;
+}
+
+function rowsFromVelocityPdf(buffer) {
+  const grouped = new Map();
+  for (const item of extractPdfTextItems(buffer)) {
+    const key = `${item.page}:${Math.round(item.y)}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  }
+  return Array.from(grouped.values()).map((items) => {
+    const status = items
+      .filter((item) => item.x >= 39 && item.x < 88)
+      .map((item) => item.text)
+      .join(" ")
+      .trim();
+    const sku = items
+      .filter((item) => item.x >= 85 && item.x < 213)
+      .sort((a, b) => a.x - b.x)
+      .map((item) => item.text)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const velocityText = items
+      .filter((item) => item.x >= 439 && item.x < 485)
+      .map((item) => item.text)
+      .join(" ");
+    const velocityPerDay = Number(String(velocityText).replace(/,/g, "").match(/-?\d+(?:\.\d+)?/)?.[0]);
+    return { status, sku, velocity_per_day: velocityPerDay };
+  }).filter((row) => /^(OK|CRITICAL|BELOW PAR)$/i.test(row.status) && row.sku && Number.isFinite(row.velocity_per_day));
+}
+
+function scoreProductMatch(uploadName, productName) {
+  const upload = normalizeMatchText(uploadName);
+  const product = normalizeMatchText(productName);
+  if (!upload || !product) return 0;
+  if (upload === product) return 1;
+  if (product.includes(upload) || upload.includes(product)) return 0.92;
+  const uploadTokens = new Set(upload.split(" ").filter(Boolean));
+  const productTokens = new Set(product.split(" ").filter(Boolean));
+  const intersection = [...uploadTokens].filter((token) => productTokens.has(token)).length;
+  const union = new Set([...uploadTokens, ...productTokens]).size || 1;
+  return intersection / union;
+}
+
+function matchVelocityRows(rows, products) {
+  const productByName = new Map(products.map((product) => [product.name, product]));
+  return rows.map((row) => {
+    const aliasTarget = PRODUCT_ALIASES.get(row.sku);
+    const aliasProduct = aliasTarget ? productByName.get(aliasTarget) : null;
+    const scored = products
+      .map((product) => ({ product, score: scoreProductMatch(row.sku, product.name) }))
+      .sort((a, b) => b.score - a.score)[0];
+    const match = aliasProduct
+      ? { product: aliasProduct, score: 1, method: "alias" }
+      : { product: scored?.score >= 0.35 ? scored.product : null, score: scored?.score || 0, method: scored?.score === 1 ? "exact" : "fuzzy" };
+    return {
+      uploaded_name: row.sku,
+      velocity_per_day: row.velocity_per_day,
+      product_id: match.product?.id || null,
+      product_name: match.product?.name || "",
+      batch_type: match.product?.category || "",
+      match_score: Number(match.score.toFixed(3)),
+      match_method: match.product ? match.method : "unmatched",
+    };
+  });
 }
 
 function fail(res, error, status = 500) {
@@ -691,6 +803,53 @@ app.delete("/api/production-batches/:id", async (req, res) => {
 app.get("/api/forecast", async (req, res) => {
   try {
     ok(res, await scheduledIngredientUsageForecast(req.query));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.get("/api/velocity-products", async (req, res) => {
+  try {
+    ok(res, {
+      products: await all(`
+        SELECT id, name, sku, category, active
+        FROM products
+        WHERE active = 1 AND category IN ('Hijnx', 'Snackbar')
+        ORDER BY category, name
+      `),
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/velocity/import", express.raw({ type: ["application/pdf", "application/octet-stream"], limit: "10mb" }), async (req, res) => {
+  try {
+    if (!Buffer.isBuffer(req.body) || !req.body.length) {
+      return fail(res, new Error("Upload a production needs PDF"), 400);
+    }
+    const products = await all(`
+      SELECT id, name, sku, category, active
+      FROM products
+      WHERE active = 1 AND category IN ('Hijnx', 'Snackbar')
+      ORDER BY category, name
+    `);
+    const parsedRows = rowsFromVelocityPdf(req.body);
+    if (!parsedRows.length) {
+      return fail(res, new Error("No SKU and Vel/Day rows were found in this PDF"), 400);
+    }
+    const rows = matchVelocityRows(parsedRows, products);
+    ok(res, {
+      rows,
+      parsed_count: parsedRows.length,
+      matched_count: rows.filter((row) => row.product_id).length,
+      instructions: [
+        "Upload the Production Needs Report PDF generated by the velocity/par tool.",
+        "The importer reads the SKU column as the source item name and Vel/Day as units sold per day.",
+        "Names are matched to active Hijnx and Snackbar production batches by alias, exact normalized name, then fuzzy token similarity.",
+        "Rows with low confidence remain visible as unmatched so an alias or master product name can be corrected.",
+      ],
+    });
   } catch (error) {
     fail(res, error);
   }

@@ -13,6 +13,7 @@
         <button data-tab="dashboard" class="active">Dashboard</button>
         <button data-tab="production">Production Planner</button>
         <button data-tab="rl-scheduled-batches">RL Scheduled Batches</button>
+        <button data-tab="velocity">Velocity Calculator</button>
         <button data-tab="forecast">Ingredient Forecast</button>
         <button data-tab="inventory">Inventory</button>
         <button data-tab="formulas">Formula Manager</button>
@@ -153,6 +154,27 @@
           <div id="forecast-window" class="source-note"></div>
         </div>
         <div id="forecast-table"></div>
+      </section>
+
+      <section id="velocity" class="view">
+        <div class="section-head">
+          <h2>Velocity Calculator</h2>
+          <span>Upload Production Needs PDF and project batches from units sold per day</span>
+        </div>
+        <div class="velocity-tools">
+          <label class="form-field">
+            <span>Projection Weeks</span>
+            <input id="velocity-weeks" type="number" min="1" step="1" value="4">
+          </label>
+          <label class="form-field">
+            <span>Production Needs PDF</span>
+            <input id="velocity-upload" type="file" accept="application/pdf,.pdf">
+          </label>
+          <button id="velocity-clear" type="button">Clear Upload</button>
+        </div>
+        <div id="velocity-message" class="form-message"></div>
+        <div id="velocity-instructions" class="source-note"></div>
+        <div id="velocity-table"></div>
       </section>
 
       <section id="inventory" class="view">
