@@ -886,7 +886,6 @@ function renderVelocityTable(products) {
       form.querySelector("input[name='batch_count']").value = roundedBatchCount == null ? "" : String(roundedBatchCount);
       form.querySelector("input[name='quantity']").value = Number(product.batch_size || 0) > 0 ? String(product.batch_size) : "";
       state.velocitySchedulePreview = null;
-      document.querySelector("#velocity-schedule-confirm").disabled = true;
       document.querySelector("#velocity-schedule-preview").innerHTML = "";
       setMessage("#velocity-schedule-message", "Building schedule preview...");
       try {
@@ -979,7 +978,6 @@ async function velocitySchedulePlan(form) {
 
 function renderVelocitySchedulePreview(plan) {
   const canSchedule = plan.proposed.length > 0 && plan.overCount === 0;
-  document.querySelector("#velocity-schedule-confirm").disabled = !canSchedule;
   const warning = plan.overCount > 0
     ? `<div class="form-message error">This window is over the velocity target by ${plan.overCount} batch entr${plan.overCount === 1 ? "y" : "ies"}. Delete ${plan.overCount} entr${plan.overCount === 1 ? "y" : "ies"} before adding more.</div>`
     : plan.missingCount === 0
@@ -993,8 +991,9 @@ function renderVelocitySchedulePreview(plan) {
       <td>${plan.overCount > 0 ? `<button class="small danger delete-velocity-existing" type="button">Delete</button>` : ""}</td>
     </tr>
   `).join("");
-  const proposedRows = plan.proposed.map((batch) => `
-    <tr>
+  const proposedRows = plan.proposed.map((batch, index) => `
+    <tr data-proposed-index="${index}">
+      <td><input class="velocity-proposed-select" type="checkbox" checked aria-label="Select proposed batch"></td>
       <td>${escapeHtml(batch.label)}</td>
       <td>${escapeHtml(batch.product_name)}</td>
       <td class="numeric">${qty(batch.quantity)}</td>
@@ -1019,11 +1018,58 @@ function renderVelocitySchedulePreview(plan) {
       <div>
         <h3>Proposed New Entries</h3>
         <div class="table-wrap velocity-schedule-table">
-          <table><thead><tr><th>Week</th><th>Batch</th><th class="numeric">Qty</th></tr></thead><tbody>${proposedRows || `<tr><td colspan="3">No new entries needed</td></tr>`}</tbody></table>
+          <table><thead><tr><th>Select</th><th>Week</th><th>Batch</th><th class="numeric">Qty</th></tr></thead><tbody>${proposedRows || `<tr><td colspan="4">No new entries needed</td></tr>`}</tbody></table>
         </div>
+        ${canSchedule ? `
+          <div class="velocity-preview-actions">
+            <button id="velocity-select-all-proposed" class="small secondary" type="button">Select All</button>
+            <button id="velocity-clear-proposed" class="small ghost" type="button">Clear</button>
+            <button id="velocity-add-selected" type="button">Add Selected To Planner</button>
+          </div>
+        ` : ""}
       </div>
     </div>
   `;
+  const selectedIndexes = () => Array.from(document.querySelectorAll(".velocity-proposed-select:checked"))
+    .map((input) => Number(input.closest("tr").dataset.proposedIndex))
+    .filter((index) => Number.isInteger(index));
+  document.querySelector("#velocity-select-all-proposed")?.addEventListener("click", () => {
+    document.querySelectorAll(".velocity-proposed-select").forEach((input) => { input.checked = true; });
+  });
+  document.querySelector("#velocity-clear-proposed")?.addEventListener("click", () => {
+    document.querySelectorAll(".velocity-proposed-select").forEach((input) => { input.checked = false; });
+  });
+  document.querySelector("#velocity-add-selected")?.addEventListener("click", async () => {
+    const indexes = selectedIndexes();
+    if (!indexes.length) {
+      setMessage("#velocity-schedule-message", "Select at least one proposed batch to add.", "error");
+      return;
+    }
+    setMessage("#velocity-schedule-message", "Adding selected scheduled batches...");
+    try {
+      for (const index of indexes) {
+        const batch = plan.proposed[index];
+        await api("/api/production-batches", {
+          method: "POST",
+          body: JSON.stringify({
+            batch_type: batch.batch_type,
+            product_id: batch.product_id,
+            week_id: batch.week_id,
+            quantity: batch.quantity,
+            notes: `Auto scheduled from velocity target of ${plan.targetCount} batches between ${plan.startWeek} and ${plan.endWeek}.`,
+          }),
+        });
+      }
+      state.velocitySchedulePreview = await velocitySchedulePlan(document.querySelector("#velocity-schedule-form"));
+      renderVelocitySchedulePreview(state.velocitySchedulePreview);
+      const overMessage = state.velocitySchedulePreview.overCount > 0
+        ? ` This window is now over target by ${state.velocitySchedulePreview.overCount}.`
+        : "";
+      setMessage("#velocity-schedule-message", `Added ${indexes.length} selected batch entr${indexes.length === 1 ? "y" : "ies"}.${overMessage}`, "success");
+    } catch (error) {
+      setMessage("#velocity-schedule-message", error.message, "error");
+    }
+  });
   document.querySelectorAll(".delete-velocity-existing").forEach((button) => {
     button.addEventListener("click", async () => {
       const row = button.closest("tr");
@@ -1069,7 +1115,6 @@ function renderVelocityScheduler(products) {
     form.querySelector("input[name='batch_count']").value = roundedBatchCount == null ? "" : String(roundedBatchCount);
     quantityInput.value = Number(product.batch_size || 0) > 0 ? String(product.batch_size) : "";
     state.velocitySchedulePreview = null;
-    document.querySelector("#velocity-schedule-confirm").disabled = true;
     document.querySelector("#velocity-schedule-preview").innerHTML = "";
   };
   productSelect.onchange = updateProductDefaults;
@@ -1083,35 +1128,7 @@ function renderVelocityScheduler(products) {
       setMessage("#velocity-schedule-message", "Preview ready.", "success");
     } catch (error) {
       state.velocitySchedulePreview = null;
-      document.querySelector("#velocity-schedule-confirm").disabled = true;
       document.querySelector("#velocity-schedule-preview").innerHTML = "";
-      setMessage("#velocity-schedule-message", error.message, "error");
-    }
-  };
-  document.querySelector("#velocity-schedule-confirm").onclick = async () => {
-    const plan = state.velocitySchedulePreview;
-    if (!plan?.proposed?.length) return;
-    setMessage("#velocity-schedule-message", "Adding scheduled batches...");
-    try {
-      for (const batch of plan.proposed) {
-        await api("/api/production-batches", {
-          method: "POST",
-          body: JSON.stringify({
-            batch_type: batch.batch_type,
-            product_id: batch.product_id,
-            week_id: batch.week_id,
-            quantity: batch.quantity,
-            notes: `Auto scheduled from velocity target of ${plan.targetCount} batches between ${plan.startWeek} and ${plan.endWeek}.`,
-          }),
-        });
-      }
-      state.velocitySchedulePreview = await velocitySchedulePlan(form);
-      renderVelocitySchedulePreview(state.velocitySchedulePreview);
-      const overMessage = state.velocitySchedulePreview.overCount > 0
-        ? ` Added entries, but this window is now over target by ${state.velocitySchedulePreview.overCount}.`
-        : "";
-      setMessage("#velocity-schedule-message", `Added ${plan.proposed.length} scheduled batch entr${plan.proposed.length === 1 ? "y" : "ies"}.${overMessage}`, "success");
-    } catch (error) {
       setMessage("#velocity-schedule-message", error.message, "error");
     }
   };

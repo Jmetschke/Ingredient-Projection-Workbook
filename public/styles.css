@@ -684,6 +684,14 @@ tr.warning td {
   max-height: 300px;
 }
 
+.velocity-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
 .velocity-size-table-wrap {
   max-height: 320px;
 }
@@ -997,6 +1005,14 @@ pre {
 
   .velocity-schedule-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .velocity-preview-actions {
+    justify-content: stretch;
+  }
+
+  .velocity-preview-actions button {
+    flex: 1 1 150px;
   }
 
   .rl-calendar-head {
