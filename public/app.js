@@ -286,8 +286,9 @@ async function renderProduction() {
   };
   document.querySelector("#production-ingredient-export").href = `/api/export/production-ingredients${productionReportQuery()}`;
 
-  fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes);
-  batchTypeSelect.onchange = () => fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes);
+  fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes, batchForm.querySelector("input[name='quantity']"));
+  batchTypeSelect.onchange = () => fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes, batchForm.querySelector("input[name='quantity']"));
+  productSelect.onchange = () => suggestBatchQuantity(productSelect, data.products, batchForm.querySelector("input[name='quantity']"));
   batchForm.onsubmit = async (event) => {
     event.preventDefault();
     setMessage("#production-message", "Adding batch...");
@@ -318,12 +319,20 @@ async function renderProduction() {
   renderProductionBatchEditor(filteredBatches, data.products, weeks, data.batchTypes);
 }
 
-function fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes) {
+function fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes, quantityInput = null) {
   const selectedType = batchTypeSelect.value || batchTypes[0];
   productSelect.innerHTML = products
     .filter((product) => product.category === selectedType)
     .map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`)
     .join("");
+  suggestBatchQuantity(productSelect, products, quantityInput);
+}
+
+function suggestBatchQuantity(productSelect, products, quantityInput) {
+  if (!quantityInput) return;
+  const product = products.find((item) => String(item.id) === String(productSelect.value));
+  const batchSize = Number(product?.batch_size || 0);
+  quantityInput.value = batchSize > 0 ? String(batchSize) : "";
 }
 
 function productionReportQuery() {
@@ -498,8 +507,10 @@ function renderProductionWeekFocus(batches, weeks, products, batchTypes) {
   const form = container.querySelector("#production-week-add-form");
   const batchTypeSelect = form.querySelector("select[name='batch_type']");
   const productSelect = form.querySelector("select[name='product_id']");
-  fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes);
-  batchTypeSelect.addEventListener("change", () => fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes));
+  const quantityInput = form.querySelector("input[name='quantity']");
+  fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes, quantityInput);
+  batchTypeSelect.addEventListener("change", () => fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes, quantityInput));
+  productSelect.addEventListener("change", () => suggestBatchQuantity(productSelect, products, quantityInput));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     setMessage("#production-message", `Adding batch to Week ${selectedWeek.weekNumber}...`);

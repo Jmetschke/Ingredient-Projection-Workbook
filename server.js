@@ -704,10 +704,11 @@ app.get("/api/production-plan", async (req, res) => {
       batchTypes: BATCH_TYPES,
       weeks: await all("SELECT id, week_start, label FROM weeks ORDER BY week_start"),
       products: await all(`
-        SELECT id, name, sku, category, active
-        FROM products
-        WHERE active = 1 AND category IN ('Hijnx', 'Snackbar')
-        ORDER BY category, name
+        SELECT p.id, p.name, p.sku, p.category, p.active, pbs.batch_size
+        FROM products p
+        LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
+        WHERE p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
+        ORDER BY p.category, p.name
       `),
       plan: await all(`
         SELECT pb.product_id, pb.week_id, SUM(pb.quantity) AS planned_qty, p.name AS product_name, w.week_start
