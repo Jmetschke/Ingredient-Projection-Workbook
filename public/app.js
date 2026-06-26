@@ -9,6 +9,9 @@ const state = {
   productionEndWeek: "",
   rlCalendarMonths: 6,
   forecastMonths: 6,
+  forecastFilter: "",
+  forecastIngredientType: "",
+  forecastRows: [],
   velocityWeeks: 4,
   velocityRows: [],
   velocityInstructions: [],
@@ -753,22 +756,53 @@ async function renderRlScheduledBatches() {
 
 async function renderForecast() {
   const monthsSelect = document.querySelector("#forecast-months");
+  const filterInput = document.querySelector("#forecast-filter");
+  const typeSelect = document.querySelector("#forecast-ingredient-type");
   monthsSelect.value = String(state.forecastMonths);
   monthsSelect.onchange = async () => {
     state.forecastMonths = Number(monthsSelect.value) || 6;
     await renderForecast();
   };
+  filterInput.value = state.forecastFilter;
+  filterInput.oninput = () => {
+    state.forecastFilter = filterInput.value.trim();
+    renderForecastTable(state.forecastRows);
+  };
+  typeSelect.value = state.forecastIngredientType;
+  typeSelect.onchange = () => {
+    state.forecastIngredientType = typeSelect.value;
+    renderForecastTable(state.forecastRows);
+  };
   const data = await api(`/api/forecast?months=${state.forecastMonths}`);
   document.querySelector("#forecast-window").textContent = `${data.filters.start} through ${data.filters.end}`;
+  state.forecastRows = data.rows || [];
+  document.querySelector("#forecast-ingredient-options").innerHTML = [...new Set(state.forecastRows.map((row) => row.ingredient_name).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => `<option value="${escapeHtml(name)}"></option>`)
+    .join("");
+  renderForecastTable(state.forecastRows);
+}
+
+function renderForecastTable(rows) {
+  const keyword = state.forecastFilter.toLowerCase();
+  const ingredientType = state.forecastIngredientType;
+  const typeOrder = { Hijnx: 1, SB: 2, "SB/Hijnx": 3 };
+  const filtered = rows.filter((row) => {
+    const matchesKeyword = !keyword || ["ingredient_name", "quantity_uom", "products"].some((field) => String(row[field] ?? "").toLowerCase().includes(keyword));
+    const matchesType = !ingredientType || row.ingredient_type === ingredientType;
+    return matchesKeyword && matchesType;
+  }).sort((a, b) => (typeOrder[a.ingredient_type] || 9) - (typeOrder[b.ingredient_type] || 9)
+    || String(a.ingredient_name || "").localeCompare(String(b.ingredient_name || "")));
   document.querySelector("#forecast-table").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
+    { label: "Type", key: "ingredient_type" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
     { label: "First Week", key: "first_week" },
     { label: "Last Week", key: "last_week" },
-  ], filteredRows(data.rows || [], ["ingredient_name", "quantity_uom", "products"]));
+  ], filteredRows(filtered, ["ingredient_name", "ingredient_type", "quantity_uom", "products"]));
 }
 
 function velocityRowForProduct(product) {

@@ -418,6 +418,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
   const rows = await all(`
     SELECT i.id AS ingredient_id,
            i.name AS ingredient_name,
+           i.ingredient_type,
            COALESCE(pf.quantity_uom, 'grams') AS quantity_uom,
            SUM(pb.quantity * COALESCE(pf.quantity_per_unit, 0)) AS required_qty,
            COUNT(DISTINCT pb.id) AS scheduled_batches,
@@ -433,7 +434,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
     WHERE pb.quantity > 0
       AND w.week_start >= @start
       AND w.week_start < @end
-    GROUP BY i.id, COALESCE(pf.quantity_uom, 'grams')
+    GROUP BY i.id, i.ingredient_type, COALESCE(pf.quantity_uom, 'grams')
     HAVING required_qty > 0
     ORDER BY i.name, quantity_uom
   `, { start, end });

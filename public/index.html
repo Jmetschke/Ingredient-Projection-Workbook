@@ -151,6 +151,20 @@
               <option value="12">12 months</option>
             </select>
           </label>
+          <label class="form-field">
+            <span>Ingredient Search</span>
+            <input id="forecast-filter" type="search" placeholder="Ingredient name" list="forecast-ingredient-options">
+            <datalist id="forecast-ingredient-options"></datalist>
+          </label>
+          <label class="form-field">
+            <span>Item Type</span>
+            <select id="forecast-ingredient-type">
+              <option value="">All types</option>
+              <option value="Hijnx">Hijnx</option>
+              <option value="SB">SB</option>
+              <option value="SB/Hijnx">Both</option>
+            </select>
+          </label>
           <div id="forecast-window" class="source-note"></div>
         </div>
         <div id="forecast-table"></div>
