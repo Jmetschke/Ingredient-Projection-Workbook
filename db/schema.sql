@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS product_batch_sizes (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS latest_velocity_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uploaded_name TEXT NOT NULL,
+  velocity_per_day REAL NOT NULL,
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  product_name TEXT,
+  batch_type TEXT,
+  match_score REAL,
+  match_method TEXT,
+  uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ingredient_id INTEGER NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,

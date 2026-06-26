@@ -824,6 +824,7 @@ function velocityProjection(product) {
 async function renderVelocity() {
   const data = await api("/api/velocity-products");
   state.velocityProducts = data.products || [];
+  state.velocityRows = data.rows || [];
   const weeksInput = document.querySelector("#velocity-weeks");
   weeksInput.value = String(state.velocityWeeks);
   weeksInput.oninput = () => {
@@ -1393,11 +1394,16 @@ document.querySelector("#velocity-upload").addEventListener("change", async (eve
 });
 
 document.querySelector("#velocity-clear").addEventListener("click", async () => {
-  state.velocityRows = [];
-  state.velocityInstructions = [];
-  document.querySelector("#velocity-upload").value = "";
-  setMessage("#velocity-message", "Velocity upload cleared.", "success");
-  await renderVelocity();
+  try {
+    await api("/api/velocity/import", { method: "DELETE" });
+    state.velocityRows = [];
+    state.velocityInstructions = [];
+    document.querySelector("#velocity-upload").value = "";
+    setMessage("#velocity-message", "Shared velocity upload cleared.", "success");
+    await renderVelocity();
+  } catch (error) {
+    setMessage("#velocity-message", error.message, "error");
+  }
 });
 
 document.querySelector("#velocity-size-form").addEventListener("submit", async (event) => {

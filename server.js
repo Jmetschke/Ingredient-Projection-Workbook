@@ -155,6 +155,41 @@ function matchVelocityRows(rows, products) {
   });
 }
 
+async function latestVelocityRows() {
+  return all(`
+    SELECT uploaded_name,
+           velocity_per_day,
+           product_id,
+           product_name,
+           batch_type,
+           match_score,
+           match_method,
+           uploaded_at
+    FROM latest_velocity_rows
+    ORDER BY id
+  `);
+}
+
+async function replaceLatestVelocityRows(rows) {
+  await run("DELETE FROM latest_velocity_rows");
+  for (const row of rows) {
+    await run(
+      `INSERT INTO latest_velocity_rows
+        (uploaded_name, velocity_per_day, product_id, product_name, batch_type, match_score, match_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.uploaded_name,
+        row.velocity_per_day,
+        row.product_id || null,
+        row.product_name || "",
+        row.batch_type || "",
+        row.match_score ?? null,
+        row.match_method || "",
+      ],
+    );
+  }
+}
+
 function fail(res, error, status = 500) {
   console.error(error);
   res.status(status).json({ ok: false, error: error.message || String(error) });
@@ -841,6 +876,7 @@ app.get("/api/velocity-products", async (req, res) => {
         WHERE p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
         ORDER BY p.category, p.name
       `),
+      rows: await latestVelocityRows(),
     });
   } catch (error) {
     fail(res, error);
@@ -914,6 +950,15 @@ app.delete("/api/velocity-batch-sizes/:productId", async (req, res) => {
   }
 });
 
+app.delete("/api/velocity/import", async (req, res) => {
+  try {
+    await run("DELETE FROM latest_velocity_rows");
+    ok(res, { cleared: true });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
 app.post("/api/velocity/import", express.raw({ type: ["application/pdf", "application/octet-stream"], limit: "10mb" }), async (req, res) => {
   try {
     if (!Buffer.isBuffer(req.body) || !req.body.length) {
@@ -930,6 +975,7 @@ app.post("/api/velocity/import", express.raw({ type: ["application/pdf", "applic
       return fail(res, new Error("No SKU and Vel/Day rows were found in this PDF"), 400);
     }
     const rows = matchVelocityRows(parsedRows, products);
+    await replaceLatestVelocityRows(rows);
     ok(res, {
       rows,
       parsed_count: parsedRows.length,
