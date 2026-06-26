@@ -1424,6 +1424,25 @@ document.querySelector("#velocity-size-form").addEventListener("submit", async (
 
 document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);
 
+document.querySelector("#formula-product-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  setMessage("#formula-product-message", "Adding production batch...");
+  try {
+    const created = await api("/api/products", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+    });
+    form.reset();
+    state.selectedFormulaProductId = String(created.id);
+    setMessage("#formula-product-message", `Added ${created.name}.`, "success");
+    await loadReference();
+    await renderFormulas();
+  } catch (error) {
+    setMessage("#formula-product-message", error.message, "error");
+  }
+});
+
 document.querySelector("#inventory-item-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;

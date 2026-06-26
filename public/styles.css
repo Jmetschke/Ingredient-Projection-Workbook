@@ -872,6 +872,14 @@ tr.warning td {
   margin-bottom: 12px;
 }
 
+.formula-product-create-panel {
+  margin-top: 4px;
+}
+
+.formula-product-form {
+  grid-template-columns: minmax(240px, 1fr) minmax(140px, 180px) minmax(150px, 220px) minmax(120px, auto);
+}
+
 .stack-form {
   display: grid;
   gap: 8px;
@@ -958,7 +966,7 @@ pre {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .production-week-add-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .formula-product-form, .production-week-add-form {
     grid-template-columns: 1fr;
     display: grid;
   }
