@@ -60,6 +60,10 @@ export async function initDb() {
   if (!ingredientColumns.some((column) => column.name === "ingredient_type")) {
     await execute("ALTER TABLE ingredients ADD COLUMN ingredient_type TEXT NOT NULL DEFAULT 'SB/Hijnx'");
   }
+  const velocityColumns = await all("PRAGMA table_info(latest_velocity_rows)");
+  if (!velocityColumns.some((column) => column.name === "projected_units")) {
+    await execute("ALTER TABLE latest_velocity_rows ADD COLUMN projected_units REAL");
+  }
 }
 
 export async function one(sql, params = {}) {

@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS product_batch_sizes (
 CREATE TABLE IF NOT EXISTS latest_velocity_rows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   uploaded_name TEXT NOT NULL,
+  projected_units REAL,
   velocity_per_day REAL NOT NULL,
   product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
   product_name TEXT,

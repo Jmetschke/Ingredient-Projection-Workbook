@@ -814,9 +814,13 @@ function velocityProjection(product) {
   const weeks = Math.max(1, Number(state.velocityWeeks) || 1);
   const imported = velocityRowForProduct(product);
   const velocity = Number(imported?.velocity_per_day || 0);
+  const projectedUnits = Number(imported?.projected_units || 0);
   const batchSize = Number(product.batch_size || 0);
+  const daysToOut = imported && velocity > 0 && projectedUnits >= 0 ? projectedUnits / velocity : null;
   return {
+    projected_units: imported && Number.isFinite(projectedUnits) ? projectedUnits : null,
     velocity_per_day: imported ? velocity : null,
+    days_to_out: daysToOut,
     batches_needed: imported && batchSize > 0 ? (velocity * weeks * 7) / batchSize : null,
   };
 }
@@ -845,7 +849,7 @@ async function renderVelocity() {
     ? `<ul>${state.velocityInstructions.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
     : `<ul>
         <li>Upload a Production Needs Report PDF.</li>
-        <li>The importer reads SKU names and Vel/Day values, then matches them to active production batches.</li>
+        <li>The importer reads SKU names, Projected units, and Vel/Day values, then matches them to active production batches.</li>
         <li>Projected batch quantity is Vel/Day x projection weeks x 7.</li>
       </ul>`;
   const sizeProductSelect = document.querySelector("#velocity-size-form select[name='product_id']");
@@ -864,14 +868,18 @@ function renderVelocityTable(products) {
       product_id: product.id,
       product_name: product.name,
       batch_type: product.category,
+      projected_units: projection.projected_units,
       velocity_per_day: projection.velocity_per_day,
+      days_to_out: projection.days_to_out,
       batches_needed: projection.batches_needed,
     };
   });
   document.querySelector("#velocity-table").innerHTML = table([
     { label: "Production Batch", value: (row) => escapeHtml(row.product_name) },
     { label: "Type", value: (row) => escapeHtml(row.batch_type) },
+    { label: "Projected Units", numeric: true, value: (row) => row.projected_units == null ? "" : qty(row.projected_units) },
     { label: "Vel / Day", numeric: true, value: (row) => row.velocity_per_day == null ? "" : qty(row.velocity_per_day) },
+    { label: "Days To Out", numeric: true, value: (row) => row.days_to_out == null ? "" : qty(row.days_to_out) },
     { label: "Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : qty(row.batches_needed) },
     { label: "Whole Batches", numeric: true, value: (row) => row.batches_needed == null ? "" : Math.ceil(row.batches_needed) },
     { label: "Actions", value: (row) => `<button class="small secondary velocity-use-schedule" type="button" data-product-id="${row.product_id}">Preview Schedule</button>` },
@@ -921,6 +929,22 @@ function evenlySpacedWeeks(weeks, count) {
   });
 }
 
+function weekContainingDate(weeks, date) {
+  const targetIso = isoDate(date);
+  return weeks.find((week) => targetIso >= week.week_start && targetIso <= isoDate(week.blockEnd));
+}
+
+function velocityFirstScheduleWeek(product, weeks) {
+  const projection = velocityProjection(product);
+  if (!weeks.length || projection.days_to_out == null || !Number.isFinite(projection.days_to_out)) return null;
+  const targetDate = addDays(new Date(), Math.ceil(projection.days_to_out) - 10);
+  const containing = weekContainingDate(weeks, targetDate);
+  if (containing) return containing;
+  const targetIso = isoDate(targetDate);
+  if (targetIso < weeks[0].week_start) return weeks[0];
+  return weeks[weeks.length - 1];
+}
+
 async function velocitySchedulePlan(form) {
   const productId = form.querySelector("select[name='product_id']").value;
   const product = state.velocityProducts.find((item) => String(item.id) === String(productId));
@@ -934,8 +958,11 @@ async function velocitySchedulePlan(form) {
   if (!startWeek || !endWeek || endWeek < startWeek) throw new Error("Select a valid schedule window.");
 
   const production = await api("/api/production-plan");
-  const weeks = production.weeks.map(weekMeta).filter((week) => week.week_start >= startWeek && week.week_start <= endWeek);
-  if (!weeks.length) throw new Error("No production weeks found in that schedule window.");
+  const selectedWeeks = production.weeks.map(weekMeta).filter((week) => week.week_start >= startWeek && week.week_start <= endWeek);
+  if (!selectedWeeks.length) throw new Error("No production weeks found in that schedule window.");
+  const firstScheduleWeek = velocityFirstScheduleWeek(product, selectedWeeks) || selectedWeeks[0];
+  const weeks = selectedWeeks.filter((week) => week.week_start >= firstScheduleWeek.week_start);
+  if (!weeks.length) throw new Error("No production weeks found after the velocity stock-out target.");
   const targetWeeks = evenlySpacedWeeks(weeks, targetCount);
   const targetSlotsByWeek = targetWeeks.reduce((slots, week) => {
     const key = String(week.id);
@@ -973,7 +1000,29 @@ async function velocitySchedulePlan(form) {
     }
   }
   const missingCount = proposed.length;
-  return { product, targetCount, quantity, startWeek, endWeek, weeks, targetWeeks, existing, ignoredExisting, missingCount, overCount, proposed };
+  const projection = velocityProjection(product);
+  const stockOutDate = projection.days_to_out == null ? "" : isoDate(addDays(new Date(), Math.ceil(projection.days_to_out)));
+  const firstBatchTargetDate = projection.days_to_out == null ? "" : isoDate(addDays(new Date(), Math.ceil(projection.days_to_out) - 10));
+  return {
+    product,
+    targetCount,
+    quantity,
+    startWeek,
+    endWeek,
+    weeks,
+    targetWeeks,
+    existing,
+    ignoredExisting,
+    missingCount,
+    overCount,
+    proposed,
+    projectedUnits: projection.projected_units,
+    velocityPerDay: projection.velocity_per_day,
+    daysToOut: projection.days_to_out,
+    stockOutDate,
+    firstBatchTargetDate,
+    firstScheduleWeek,
+  };
 }
 
 function renderVelocitySchedulePreview(plan) {
@@ -1007,7 +1056,9 @@ function renderVelocitySchedulePreview(plan) {
       <div><strong>${plan.proposed.length}</strong><span>Will Add</span></div>
       <div><strong>${plan.overCount}</strong><span>Over Target</span></div>
       <div><strong>${plan.ignoredExisting?.length || 0}</strong><span>Ignored Existing</span></div>
+      <div><strong>${plan.firstScheduleWeek ? escapeHtml(plan.firstScheduleWeek.week_start) : ""}</strong><span>Target First Week</span></div>
     </div>
+    ${plan.stockOutDate ? `<div class="source-note">Projected units ${qty(plan.projectedUnits)} at ${qty(plan.velocityPerDay)} units/day estimates an out date of ${escapeHtml(plan.stockOutDate)}. Scheduling begins in the week containing ${escapeHtml(plan.firstBatchTargetDate)}.</div>` : ""}
     <div class="grid two">
       <div>
         <h3>Existing Planner Entries</h3>
