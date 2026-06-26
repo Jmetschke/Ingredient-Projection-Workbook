@@ -1151,6 +1151,7 @@ async function renderInventory() {
             </td>
             <td class="row-actions">
               <button class="small secondary save-inventory" type="button">Save</button>
+              <button class="small danger delete-inventory" type="button">Delete</button>
             </td>
           </tr>
         `).join("")}</tbody>
@@ -1171,6 +1172,22 @@ async function renderInventory() {
           }),
         });
         message.textContent = `Saved ${updated.name}.`;
+        await loadReference();
+        await renderInventory();
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    });
+  });
+  document.querySelectorAll(".delete-inventory").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      const name = row.querySelector(".inventory-edit-name").value;
+      const message = document.querySelector("#inventory-message");
+      if (!confirm(`Delete ${name}? This will also remove it from any product BOMs.`)) return;
+      try {
+        await api(`/api/ingredients/${row.dataset.ingredientId}`, { method: "DELETE" });
+        message.textContent = `Deleted ${name}.`;
         await loadReference();
         await renderInventory();
       } catch (error) {

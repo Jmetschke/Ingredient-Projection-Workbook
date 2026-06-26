@@ -413,7 +413,7 @@ function forecastDateWindow(months = 6) {
 }
 
 async function scheduledIngredientUsageForecast(query = {}) {
-  const monthCount = [6, 9, 12].includes(Number(query.months)) ? Number(query.months) : 6;
+  const monthCount = [1, 3, 6, 9, 12].includes(Number(query.months)) ? Number(query.months) : 6;
   const { start, end } = forecastDateWindow(monthCount);
   const rows = await all(`
     SELECT i.id AS ingredient_id,
@@ -702,6 +702,18 @@ app.patch("/api/ingredients/:id", async (req, res) => {
       FROM ingredients
       WHERE id = ?
     `, [req.params.id])));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.delete("/api/ingredients/:id", async (req, res) => {
+  try {
+    const existing = await one("SELECT id, name FROM ingredients WHERE id = ? AND is_master = 1", [req.params.id]);
+    if (!existing) return fail(res, new Error("Inventory item not found"), 404);
+    const result = await run("DELETE FROM ingredients WHERE id = ? AND is_master = 1", [req.params.id]);
+    if (!result.changes) return fail(res, new Error("Inventory item not found"), 404);
+    ok(res, { id: Number(req.params.id), name: existing.name });
   } catch (error) {
     fail(res, error);
   }
