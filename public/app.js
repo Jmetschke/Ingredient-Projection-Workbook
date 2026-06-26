@@ -241,12 +241,14 @@ async function renderProduction() {
   const reportStartSelect = document.querySelector("#production-filter-start");
   const reportEndSelect = document.querySelector("#production-filter-end");
   const weeks = data.weeks.map(weekMeta);
-  const currentWeekStart = currentWeekStartIso();
-  const schedulingWeeks = weeks.filter((week) => week.week_start >= currentWeekStart);
+  const rollingStartWeek = nextProductionWeekStartIso();
+  const schedulingWeeks = weeks.filter((week) => week.week_start >= rollingStartWeek);
   const weekOptions = schedulingWeeks.length ? schedulingWeeks : weeks;
   const defaultWeeks = visibleCalendarWeeks(weeks, state.productionCalendarMonths);
-  if (!state.productionStartWeek) state.productionStartWeek = defaultWeeks[0]?.week_start || weeks[0]?.week_start || "";
-  if (!state.productionEndWeek) state.productionEndWeek = defaultWeeks.at(-1)?.week_start || weeks.at(-1)?.week_start || "";
+  const defaultStartWeek = defaultWeeks[0]?.week_start || rollingStartWeek;
+  const defaultEndWeek = defaultWeeks.at(-1)?.week_start || defaultStartWeek;
+  if (!state.productionStartWeek || state.productionStartWeek < rollingStartWeek) state.productionStartWeek = defaultStartWeek;
+  if (!state.productionEndWeek || state.productionEndWeek < state.productionStartWeek) state.productionEndWeek = defaultEndWeek;
   const filteredWeeks = weeks.filter((week) => (!state.productionStartWeek || week.week_start >= state.productionStartWeek)
     && (!state.productionEndWeek || week.week_start <= state.productionEndWeek));
   const filteredBatches = data.batches.filter((batch) => (!state.productionBatchType || batch.batch_type === state.productionBatchType)
@@ -263,8 +265,8 @@ async function renderProduction() {
   calendarMonthsSelect.onchange = async () => {
     state.productionCalendarMonths = Number(calendarMonthsSelect.value) || 6;
     const nextDefaultWeeks = visibleCalendarWeeks(weeks, state.productionCalendarMonths);
-    state.productionStartWeek = nextDefaultWeeks[0]?.week_start || state.productionStartWeek;
-    state.productionEndWeek = nextDefaultWeeks.at(-1)?.week_start || state.productionEndWeek;
+    state.productionStartWeek = nextDefaultWeeks[0]?.week_start || rollingStartWeek;
+    state.productionEndWeek = nextDefaultWeeks.at(-1)?.week_start || state.productionStartWeek;
     await renderProduction();
   };
   reportBatchTypeSelect.value = state.productionBatchType;
@@ -456,20 +458,19 @@ function renderProductionWeekFocus(batches, weeks, products, batchTypes) {
   const selectedWeek = weeks.find((week) => String(week.id) === String(state.selectedProductionWeekId));
   const container = document.querySelector("#production-week-focus");
   if (!selectedWeek) {
-    container.innerHTML = `
-      <div class="focus-panel production-week-focus empty-focus">
-        <h2>Select a week</h2>
-        <p>Choose a calendar week to add or delete batches for that week.</p>
-      </div>
-    `;
+    container.innerHTML = "";
     return;
   }
   const scheduled = batches.filter((batch) => String(batch.week_id) === String(selectedWeek.id));
   container.innerHTML = `
-    <div class="focus-panel production-week-focus">
+    <div class="focus-backdrop" role="presentation" data-close-week-focus>
+      <div class="focus-panel production-week-focus" role="dialog" aria-modal="true" aria-labelledby="production-week-focus-title">
       <div class="section-head">
-        <h2>Week ${selectedWeek.weekNumber}</h2>
-        <span>${escapeHtml(selectedWeek.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</span>
+        <div>
+          <h2 id="production-week-focus-title">Week ${selectedWeek.weekNumber}</h2>
+          <span>${escapeHtml(selectedWeek.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</span>
+        </div>
+        <button class="small ghost" type="button" data-close-week-focus>Close</button>
       </div>
       <form id="production-week-add-form" class="inline-form production-week-add-form">
         <input name="week_id" type="hidden" value="${escapeHtml(selectedWeek.id)}">
@@ -501,8 +502,19 @@ function renderProductionWeekFocus(batches, weeks, products, batchTypes) {
           </div>
         `).join("") : `<div class="empty-calendar">No batches scheduled for this week.</div>`}
       </div>
+      </div>
     </div>
   `;
+  const closeFocus = async () => {
+    state.selectedProductionWeekId = "";
+    await renderProduction();
+  };
+  container.querySelectorAll("[data-close-week-focus]").forEach((element) => {
+    element.addEventListener("click", async (event) => {
+      if (event.target !== element) return;
+      await closeFocus();
+    });
+  });
 
   const form = container.querySelector("#production-week-add-form");
   const batchTypeSelect = form.querySelector("select[name='batch_type']");
@@ -542,8 +554,7 @@ function renderProductionWeekFocus(batches, weeks, products, batchTypes) {
 }
 
 function visibleCalendarWeeks(weeks, monthCount) {
-  const today = new Date();
-  const firstVisible = saturdayForWeek(isoDate(today));
+  const firstVisible = parseIsoDate(nextProductionWeekStartIso());
   const lastVisible = addMonths(firstVisible, monthCount);
   return weeks.filter((week) => week.blockEnd >= firstVisible && week.blockStart < lastVisible);
 }
@@ -585,6 +596,10 @@ function currentWeekStartIso() {
   const today = new Date();
   const daysSinceMonday = (today.getDay() + 6) % 7;
   return isoDate(addDays(today, -daysSinceMonday));
+}
+
+function nextProductionWeekStartIso() {
+  return isoDate(addDays(parseIsoDate(currentWeekStartIso()), 7));
 }
 
 function renderProductionCalendar(batches, weeks) {

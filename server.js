@@ -287,6 +287,10 @@ function mondayForDate(date = new Date()) {
   return addDateDays(date, -daysSinceMonday);
 }
 
+function nextProductionWeekStart(date = new Date()) {
+  return addDateDays(mondayForDate(date), 7);
+}
+
 function sundayForDate(date = new Date()) {
   return addDateDays(date, -date.getDay());
 }
@@ -342,10 +346,8 @@ function productionIngredientFilters(query) {
     where.push("pb.batch_type = @batchType");
     params.batchType = query.batch_type;
   }
-  if (query.start) {
-    where.push("w.week_start >= @start");
-    params.start = query.start;
-  }
+  params.start = query.start || localIsoDate(nextProductionWeekStart());
+  where.push("w.week_start >= @start");
   if (query.end) {
     where.push("w.week_start <= @end");
     params.end = query.end;
@@ -392,7 +394,7 @@ async function productionIngredientReport(query = {}) {
   return {
     filters: {
       batch_type: query.batch_type || "",
-      start: query.start || "",
+      start: params.start,
       end: query.end || "",
     },
     rows,
@@ -401,8 +403,7 @@ async function productionIngredientReport(query = {}) {
 }
 
 function forecastDateWindow(months = 6) {
-  const today = new Date();
-  const start = mondayForDate(today);
+  const start = nextProductionWeekStart(new Date());
   const end = new Date(start);
   end.setMonth(end.getMonth() + months);
   return {
@@ -479,13 +480,21 @@ app.get("/api/health", async (req, res) => {
 app.get("/api/summary", async (req, res) => {
   try {
     const ingredientUsage = await scheduledIngredientUsageForecast({ months: 6 });
-    const dashboardStart = localIsoDate(mondayForDate(new Date()));
-    const dashboardEnd = localIsoDate(addDateDays(mondayForDate(new Date()), 24 * 7));
+    const dashboardStartDate = nextProductionWeekStart(new Date());
+    const dashboardStart = localIsoDate(dashboardStartDate);
+    const dashboardEnd = localIsoDate(addDateDays(dashboardStartDate, 24 * 7));
     ok(res, {
       counts: {
         products: (await one("SELECT COUNT(*) AS n FROM products"))?.n || 0,
         ingredients: (await one("SELECT COUNT(*) AS n FROM ingredients"))?.n || 0,
-        scheduled_batches: (await one("SELECT COUNT(*) AS n FROM production_batches WHERE quantity > 0"))?.n || 0,
+        scheduled_batches: (await one(`
+          SELECT COUNT(*) AS n
+          FROM production_batches pb
+          JOIN weeks w ON w.id = pb.week_id
+          WHERE pb.quantity > 0
+            AND w.week_start >= @start
+            AND w.week_start < @end
+        `, { start: dashboardStart, end: dashboardEnd }))?.n || 0,
       },
       ingredientUsage,
       productionWeeks: await all(`

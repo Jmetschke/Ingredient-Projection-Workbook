@@ -136,6 +136,12 @@ button.danger {
   color: var(--danger);
 }
 
+button.ghost {
+  background: white;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
 .view {
   display: none;
 }
@@ -519,7 +525,7 @@ tr.warning td {
 
 .week-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 10px;
 }
 
@@ -654,8 +660,26 @@ tr.warning td {
   align-items: start;
 }
 
+.focus-backdrop {
+  align-items: center;
+  background: rgba(23, 32, 38, 0.42);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  padding: 18px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 40;
+}
+
 .production-week-focus {
-  margin-bottom: 14px;
+  box-shadow: 0 24px 60px rgba(23, 32, 38, 0.22);
+  max-height: min(720px, calc(100vh - 36px));
+  max-width: 860px;
+  overflow: auto;
+  width: min(860px, 100%);
 }
 
 .production-week-focus.empty-focus p {
@@ -857,6 +881,10 @@ pre {
   }
 
   .dashboard-week-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .week-grid {
     grid-template-columns: 1fr;
   }
 
