@@ -175,6 +175,23 @@
         <div id="velocity-message" class="form-message"></div>
         <div id="velocity-instructions" class="source-note"></div>
         <div id="velocity-table"></div>
+        <div class="section-head">
+          <h2>Standard Batch Sizes</h2>
+          <span>Edit the unit count used to calculate batches needed</span>
+        </div>
+        <form id="velocity-size-form" class="inline-form velocity-size-form">
+          <label class="form-field">
+            <span>Production Batch</span>
+            <select name="product_id" required></select>
+          </label>
+          <label class="form-field">
+            <span>Standard Batch Size</span>
+            <input name="batch_size" type="number" min="0.000001" step="0.000001" required>
+          </label>
+          <button type="submit">Add / Update</button>
+        </form>
+        <div id="velocity-size-message" class="form-message"></div>
+        <div id="velocity-size-editor" class="velocity-size-editor"></div>
       </section>
 
       <section id="inventory" class="view">

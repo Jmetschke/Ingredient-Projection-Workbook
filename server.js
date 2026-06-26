@@ -812,12 +812,80 @@ app.get("/api/velocity-products", async (req, res) => {
   try {
     ok(res, {
       products: await all(`
-        SELECT id, name, sku, category, active
-        FROM products
-        WHERE active = 1 AND category IN ('Hijnx', 'Snackbar')
-        ORDER BY category, name
+        SELECT p.id, p.name, p.sku, p.category, p.active, pbs.batch_size
+        FROM products p
+        LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
+        WHERE p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
+        ORDER BY p.category, p.name
       `),
     });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.get("/api/velocity-batch-sizes", async (req, res) => {
+  try {
+    ok(res, {
+      rows: await all(`
+        SELECT p.id AS product_id, p.name AS product_name, p.category AS batch_type, pbs.batch_size
+        FROM products p
+        LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
+        WHERE p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
+        ORDER BY p.category, p.name
+      `),
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/velocity-batch-sizes", async (req, res) => {
+  try {
+    const productId = Number(req.body.product_id);
+    const batchSize = Number(req.body.batch_size);
+    const product = await one("SELECT id FROM products WHERE id = ? AND active = 1 AND category IN ('Hijnx', 'Snackbar')", [productId]);
+    if (!product) return fail(res, new Error("Select a valid production batch"), 400);
+    if (batchSize <= 0) return fail(res, new Error("Standard batch size must be greater than zero"), 400);
+    await run(
+      `INSERT INTO product_batch_sizes (product_id, batch_size, updated_at)
+       VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(product_id) DO UPDATE SET
+         batch_size = excluded.batch_size,
+         updated_at = CURRENT_TIMESTAMP`,
+      [productId, batchSize],
+    );
+    ok(res, { product_id: productId, batch_size: batchSize });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.patch("/api/velocity-batch-sizes/:productId", async (req, res) => {
+  try {
+    const productId = Number(req.params.productId);
+    const batchSize = Number(req.body.batch_size);
+    const product = await one("SELECT id FROM products WHERE id = ? AND active = 1 AND category IN ('Hijnx', 'Snackbar')", [productId]);
+    if (!product) return fail(res, new Error("Select a valid production batch"), 400);
+    if (batchSize <= 0) return fail(res, new Error("Standard batch size must be greater than zero"), 400);
+    await run(
+      `INSERT INTO product_batch_sizes (product_id, batch_size, updated_at)
+       VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(product_id) DO UPDATE SET
+         batch_size = excluded.batch_size,
+         updated_at = CURRENT_TIMESTAMP`,
+      [productId, batchSize],
+    );
+    ok(res, { product_id: productId, batch_size: batchSize });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.delete("/api/velocity-batch-sizes/:productId", async (req, res) => {
+  try {
+    await run("DELETE FROM product_batch_sizes WHERE product_id = ?", [Number(req.params.productId)]);
+    ok(res, { product_id: Number(req.params.productId) });
   } catch (error) {
     fail(res, error);
   }

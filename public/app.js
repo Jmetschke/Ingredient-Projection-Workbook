@@ -12,6 +12,7 @@ const state = {
   velocityWeeks: 4,
   velocityRows: [],
   velocityInstructions: [],
+  velocityProducts: [],
   selectedFormulaProductId: "",
   selectedProductionWeekId: "",
 };
@@ -750,11 +751,12 @@ function velocityRowForProduct(product) {
 
 async function renderVelocity() {
   const data = await api("/api/velocity-products");
+  state.velocityProducts = data.products || [];
   const weeksInput = document.querySelector("#velocity-weeks");
   weeksInput.value = String(state.velocityWeeks);
   weeksInput.oninput = () => {
     state.velocityWeeks = Math.max(1, Number(weeksInput.value) || 1);
-    renderVelocityTable(data.products);
+    renderVelocityTable(state.velocityProducts);
   };
   document.querySelector("#velocity-instructions").innerHTML = state.velocityInstructions.length
     ? `<ul>${state.velocityInstructions.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
@@ -763,7 +765,12 @@ async function renderVelocity() {
         <li>The importer reads SKU names and Vel/Day values, then matches them to active production batches.</li>
         <li>Projected batch quantity is Vel/Day x projection weeks x 7.</li>
       </ul>`;
-  renderVelocityTable(data.products);
+  const sizeProductSelect = document.querySelector("#velocity-size-form select[name='product_id']");
+  sizeProductSelect.innerHTML = state.velocityProducts
+    .map((product) => `<option value="${product.id}">${escapeHtml(product.category)} - ${escapeHtml(product.name)}</option>`)
+    .join("");
+  renderVelocityTable(state.velocityProducts);
+  renderVelocitySizeEditor(state.velocityProducts);
 }
 
 function renderVelocityTable(products) {
@@ -771,35 +778,70 @@ function renderVelocityTable(products) {
   const rows = products.map((product) => {
     const imported = velocityRowForProduct(product);
     const velocity = Number(imported?.velocity_per_day || 0);
+    const batchSize = Number(product.batch_size || 0);
     return {
       product_name: product.name,
       batch_type: product.category,
-      uploaded_name: imported?.uploaded_name || "",
       velocity_per_day: imported ? velocity : null,
-      projected_qty: imported ? velocity * weeks * 7 : null,
-      match_method: imported?.match_method || "",
-      match_score: imported?.match_score || "",
+      batches_needed: imported && batchSize > 0 ? (velocity * weeks * 7) / batchSize : null,
     };
   });
-  const unmatched = state.velocityRows
-    .filter((row) => !row.product_id)
-    .map((row) => ({
-      product_name: "",
-      batch_type: "",
-      uploaded_name: row.uploaded_name,
-      velocity_per_day: row.velocity_per_day,
-      projected_qty: Number(row.velocity_per_day || 0) * weeks * 7,
-      match_method: "unmatched",
-      match_score: row.match_score || "",
-    }));
   document.querySelector("#velocity-table").innerHTML = table([
     { label: "Production Batch", value: (row) => escapeHtml(row.product_name) },
     { label: "Type", value: (row) => escapeHtml(row.batch_type) },
-    { label: "Uploaded Name", value: (row) => escapeHtml(row.uploaded_name) },
     { label: "Vel / Day", numeric: true, value: (row) => row.velocity_per_day == null ? "" : qty(row.velocity_per_day) },
-    { label: "Projected Batch Qty", numeric: true, value: (row) => row.projected_qty == null ? "" : qty(row.projected_qty) },
-    { label: "Match", value: (row) => escapeHtml(row.match_method ? `${row.match_method}${row.match_score ? ` (${row.match_score})` : ""}` : "") },
-  ], filteredRows([...rows, ...unmatched], ["product_name", "batch_type", "uploaded_name", "match_method"]));
+    { label: "Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : qty(row.batches_needed) },
+  ], filteredRows(rows, ["product_name", "batch_type"]));
+}
+
+function renderVelocitySizeEditor(products) {
+  const rows = filteredRows(products, ["name", "category"]);
+  document.querySelector("#velocity-size-editor").innerHTML = rows.length ? `
+    <div class="table-wrap velocity-size-table-wrap">
+      <table class="editor-table">
+        <thead><tr><th>Production Batch</th><th>Type</th><th class="numeric">Standard Batch Size</th><th>Actions</th></tr></thead>
+        <tbody>${rows.map((product) => `
+          <tr data-product-id="${product.id}">
+            <td>${escapeHtml(product.name)}</td>
+            <td>${escapeHtml(product.category)}</td>
+            <td><input class="velocity-size-input" aria-label="Standard batch size" type="number" min="0.000001" step="0.000001" value="${escapeHtml(product.batch_size ?? "")}"></td>
+            <td class="row-actions">
+              <button class="small secondary save-velocity-size" type="button">Save</button>
+              <button class="small danger delete-velocity-size" type="button">Delete</button>
+            </td>
+          </tr>
+        `).join("")}</tbody>
+      </table>
+    </div>
+  ` : `<div class="empty-calendar">No production batches found.</div>`;
+  document.querySelectorAll(".save-velocity-size").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      try {
+        await api(`/api/velocity-batch-sizes/${row.dataset.productId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ batch_size: row.querySelector(".velocity-size-input").value }),
+        });
+        setMessage("#velocity-size-message", "Standard batch size saved.", "success");
+        await renderVelocity();
+      } catch (error) {
+        setMessage("#velocity-size-message", error.message, "error");
+      }
+    });
+  });
+  document.querySelectorAll(".delete-velocity-size").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("tr");
+      if (!confirm("Delete this standard batch size?")) return;
+      try {
+        await api(`/api/velocity-batch-sizes/${row.dataset.productId}`, { method: "DELETE" });
+        setMessage("#velocity-size-message", "Standard batch size deleted.", "success");
+        await renderVelocity();
+      } catch (error) {
+        setMessage("#velocity-size-message", error.message, "error");
+      }
+    });
+  });
 }
 
 async function renderInventory() {
@@ -1054,6 +1096,22 @@ document.querySelector("#velocity-clear").addEventListener("click", async () => 
   document.querySelector("#velocity-upload").value = "";
   setMessage("#velocity-message", "Velocity upload cleared.", "success");
   await renderVelocity();
+});
+
+document.querySelector("#velocity-size-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await api("/api/velocity-batch-sizes", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+    });
+    form.querySelector("input[name='batch_size']").value = "";
+    setMessage("#velocity-size-message", "Standard batch size saved.", "success");
+    await renderVelocity();
+  } catch (error) {
+    setMessage("#velocity-size-message", error.message, "error");
+  }
 });
 
 document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);

@@ -3,7 +3,7 @@ import path from "node:path";
 import { createClient } from "@libsql/client";
 import dotenv from "dotenv";
 import { EACH_UOM_INGREDIENTS, MASTER_INGREDIENTS } from "./master-ingredients.js";
-import { MASTER_PRODUCTS } from "./master-products.js";
+import { MASTER_PRODUCTS, STANDARD_BATCH_SIZES } from "./master-products.js";
 
 dotenv.config();
 
@@ -119,6 +119,17 @@ export async function ensureMasterProducts() {
       await run(
         "INSERT INTO products (name, category, active) VALUES (?, ?, 1)",
         [product.name, product.batchType],
+      );
+    }
+  }
+  const existingSizeCount = (await one("SELECT COUNT(*) AS n FROM product_batch_sizes"))?.n || 0;
+  if (!existingSizeCount) {
+    for (const [name, batchSize] of STANDARD_BATCH_SIZES.entries()) {
+      const product = await one("SELECT id FROM products WHERE name = ?", [name]);
+      if (!product) continue;
+      await run(
+        "INSERT INTO product_batch_sizes (product_id, batch_size) VALUES (?, ?)",
+        [product.id, batchSize],
       );
     }
   }

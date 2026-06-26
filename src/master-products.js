@@ -30,6 +30,36 @@ export const MASTER_PRODUCTS = [
   { batchType: "Snackbar", name: "Snackbar Vape - Watermelon Lychee 1g" },
 ];
 
+export const STANDARD_BATCH_SIZES = new Map([
+  ["Alpha Chunk - 1pk", 7500],
+  ["Alpha Chunk - 2pk", 7500],
+  ["Chill Chunk - 1pk", 7500],
+  ["Chill Chunk - 2pk", 7500],
+  ["Hijnx 1oz Stick", 2000],
+  ["Hijnx Micro Pump - Daytime Focus", 1000],
+  ["Hijnx Micro Pump - Good Night Sleep", 1000],
+  ["Hijnx Sampler Medley Bag", 30000],
+  ["Hijnx Shooter - Sour Blue Razz 2oz", 1500],
+  ["Hijnx Shooter - Triple Citrus", 1500],
+  ["Hijnx Shooter - Watermelon", 1500],
+  ["MiNi's Chunks - 10pk", 6250],
+  ["Micro Dots", 120],
+  ["Pheotera 2oz Stick", 1000],
+  ["Rex Chunk - 2pk", 7500],
+  ["Sleep Chunk - 1pk", 7500],
+  ["Sleep Chunk - 2pk", 7500],
+  ["Sugar Free MiNi's - 10pk", 6250],
+  ["Whoopie Hi", 1000],
+  ["Zuul Chunk - 2pk", 7500],
+  ["Snackbar Vape - Cherry Pomegranate Lemon 2g", 1000],
+  ["Snackbar Vape - Grape Crush", 1500],
+  ["Snackbar Vape - Lemon Yuzu", 1500],
+  ["Snackbar Vape - Mango Magic", 1500],
+  ["Snackbar Vape - Peach Passion Fruit 2g", 1000],
+  ["Snackbar Vape - Strawberry Dragonfruit 2g", 1000],
+  ["Snackbar Vape - Watermelon Lychee 1g", 1500],
+]);
+
 export const PRODUCT_ALIASES = new Map([
   ["Space Chunk ALPHA OG 2 chunk (units)", "Alpha Chunk - 2pk"],
   ["Space Chunk OG 1 chunk (pcs)", "Chill Chunk - 1pk"],

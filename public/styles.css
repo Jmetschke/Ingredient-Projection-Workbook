@@ -634,6 +634,14 @@ tr.warning td {
   align-items: end;
 }
 
+.velocity-size-form {
+  grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) minmax(120px, auto);
+}
+
+.velocity-size-table-wrap {
+  max-height: 320px;
+}
+
 #velocity-instructions ul {
   margin: 0 0 12px;
   padding-left: 18px;
@@ -831,7 +839,7 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .production-workspace, .bom-layout, .bom-form, .production-week-add-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .production-workspace, .bom-layout, .bom-form, .production-week-add-form {
     grid-template-columns: 1fr;
     display: grid;
   }
