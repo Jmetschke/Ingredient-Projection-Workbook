@@ -821,6 +821,11 @@ function velocityProjection(product) {
   };
 }
 
+function roundedVelocityBatchCount(product) {
+  const projection = velocityProjection(product);
+  return projection.batches_needed == null ? null : Math.ceil(projection.batches_needed);
+}
+
 async function renderVelocity() {
   const data = await api("/api/velocity-products");
   state.velocityProducts = data.products || [];
@@ -833,8 +838,8 @@ async function renderVelocity() {
     renderVelocityScheduler(state.velocityProducts);
     const form = document.querySelector("#velocity-schedule-form");
     const product = state.velocityProducts.find((item) => String(item.id) === String(form.querySelector("select[name='product_id']").value));
-    const projection = product ? velocityProjection(product) : null;
-    form.querySelector("input[name='batch_count']").value = projection?.batches_needed == null ? "" : String(Math.ceil(projection.batches_needed));
+    const roundedBatchCount = product ? roundedVelocityBatchCount(product) : null;
+    form.querySelector("input[name='batch_count']").value = roundedBatchCount == null ? "" : String(roundedBatchCount);
   };
   document.querySelector("#velocity-instructions").innerHTML = state.velocityInstructions.length
     ? `<ul>${state.velocityInstructions.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
@@ -868,21 +873,30 @@ function renderVelocityTable(products) {
     { label: "Type", value: (row) => escapeHtml(row.batch_type) },
     { label: "Vel / Day", numeric: true, value: (row) => row.velocity_per_day == null ? "" : qty(row.velocity_per_day) },
     { label: "Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : qty(row.batches_needed) },
-    { label: "Actions", value: (row) => `<button class="small secondary velocity-use-schedule" type="button" data-product-id="${row.product_id}">Schedule</button>` },
+    { label: "Whole Batches", numeric: true, value: (row) => row.batches_needed == null ? "" : Math.ceil(row.batches_needed) },
+    { label: "Actions", value: (row) => `<button class="small secondary velocity-use-schedule" type="button" data-product-id="${row.product_id}">Preview Schedule</button>` },
   ], filteredRows(rows, ["product_name", "batch_type"]));
   document.querySelectorAll(".velocity-use-schedule").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const product = products.find((item) => String(item.id) === String(button.dataset.productId));
       if (!product) return;
-      const projection = velocityProjection(product);
+      const roundedBatchCount = roundedVelocityBatchCount(product);
       const form = document.querySelector("#velocity-schedule-form");
       form.querySelector("select[name='product_id']").value = String(product.id);
-      form.querySelector("input[name='batch_count']").value = projection.batches_needed == null ? "" : String(Math.ceil(projection.batches_needed));
+      form.querySelector("input[name='batch_count']").value = roundedBatchCount == null ? "" : String(roundedBatchCount);
       form.querySelector("input[name='quantity']").value = Number(product.batch_size || 0) > 0 ? String(product.batch_size) : "";
       state.velocitySchedulePreview = null;
-      setMessage("#velocity-schedule-message", "Review the schedule window, then preview.", "success");
       document.querySelector("#velocity-schedule-confirm").disabled = true;
       document.querySelector("#velocity-schedule-preview").innerHTML = "";
+      setMessage("#velocity-schedule-message", "Building schedule preview...");
+      try {
+        state.velocitySchedulePreview = await velocitySchedulePlan(form);
+        renderVelocitySchedulePreview(state.velocitySchedulePreview);
+        setMessage("#velocity-schedule-message", "Preview ready. Confirm to add these batches to Production Planner.", "success");
+        document.querySelector("#velocity-schedule-preview").scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (error) {
+        setMessage("#velocity-schedule-message", error.message, "error");
+      }
     });
   });
 }
@@ -911,7 +925,7 @@ function evenlySpacedWeeks(weeks, count) {
 async function velocitySchedulePlan(form) {
   const productId = form.querySelector("select[name='product_id']").value;
   const product = state.velocityProducts.find((item) => String(item.id) === String(productId));
-  const targetCount = Math.max(0, Math.round(Number(form.querySelector("input[name='batch_count']").value) || 0));
+  const targetCount = Math.max(0, Math.ceil(Number(form.querySelector("input[name='batch_count']").value) || 0));
   const quantity = Number(form.querySelector("input[name='quantity']").value) || 0;
   const startWeek = form.querySelector("select[name='start_week']").value;
   const endWeek = form.querySelector("select[name='end_week']").value;
@@ -1027,8 +1041,8 @@ function renderVelocityScheduler(products) {
   const updateProductDefaults = () => {
     const product = products.find((item) => String(item.id) === String(productSelect.value));
     if (!product) return;
-    const projection = velocityProjection(product);
-    form.querySelector("input[name='batch_count']").value = projection.batches_needed == null ? "" : String(Math.ceil(projection.batches_needed));
+    const roundedBatchCount = roundedVelocityBatchCount(product);
+    form.querySelector("input[name='batch_count']").value = roundedBatchCount == null ? "" : String(roundedBatchCount);
     quantityInput.value = Number(product.batch_size || 0) > 0 ? String(product.batch_size) : "";
     state.velocitySchedulePreview = null;
     document.querySelector("#velocity-schedule-confirm").disabled = true;
