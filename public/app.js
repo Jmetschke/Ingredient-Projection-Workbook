@@ -988,7 +988,7 @@ function renderVelocitySchedulePreview(plan) {
       <td>${escapeHtml(batch.week_start)}</td>
       <td>${escapeHtml(batch.product_name)}</td>
       <td class="numeric">${qty(batch.quantity)}</td>
-      <td>${plan.overCount > 0 ? `<button class="small danger delete-velocity-existing" type="button">Delete</button>` : ""}</td>
+      <td><button class="small danger delete-velocity-existing" type="button">Delete</button></td>
     </tr>
   `).join("");
   const proposedRows = plan.proposed.map((batch, index) => `
@@ -1096,17 +1096,16 @@ function renderVelocityScheduler(products) {
   const weeks = velocityScheduleWeekOptions();
   const previousProduct = productSelect.value;
   const previousStart = startSelect.value;
-  const previousEnd = endSelect.value;
   productSelect.innerHTML = products.map((product) => `<option value="${product.id}">${escapeHtml(product.category)} - ${escapeHtml(product.name)}</option>`).join("");
   const weekOptions = weeks.map((week) => `<option value="${week.week_start}">${escapeHtml(week.label)}</option>`).join("");
   startSelect.innerHTML = weekOptions;
   endSelect.innerHTML = weekOptions;
   if (previousProduct && products.some((product) => String(product.id) === String(previousProduct))) productSelect.value = previousProduct;
   if (previousStart && weeks.some((week) => week.week_start === previousStart)) startSelect.value = previousStart;
-  if (previousEnd && weeks.some((week) => week.week_start === previousEnd)) {
-    endSelect.value = previousEnd;
-  } else if (weeks.length) {
-    endSelect.value = weeks[Math.min(weeks.length - 1, Math.max(0, state.velocityWeeks - 1))].week_start;
+  const selectedStartIndex = Math.max(0, weeks.findIndex((week) => week.week_start === startSelect.value));
+  if (weeks.length) {
+    const projectedEndIndex = Math.min(weeks.length - 1, selectedStartIndex + Math.max(1, state.velocityWeeks) - 1);
+    endSelect.value = weeks[projectedEndIndex].week_start;
   }
   const updateProductDefaults = () => {
     const product = products.find((item) => String(item.id) === String(productSelect.value));
@@ -1117,7 +1116,16 @@ function renderVelocityScheduler(products) {
     state.velocitySchedulePreview = null;
     document.querySelector("#velocity-schedule-preview").innerHTML = "";
   };
+  const updateEndWeekFromStart = () => {
+    const startIndex = Math.max(0, weeks.findIndex((week) => week.week_start === startSelect.value));
+    if (!weeks.length) return;
+    const endIndex = Math.min(weeks.length - 1, startIndex + Math.max(1, state.velocityWeeks) - 1);
+    endSelect.value = weeks[endIndex].week_start;
+    state.velocitySchedulePreview = null;
+    document.querySelector("#velocity-schedule-preview").innerHTML = "";
+  };
   productSelect.onchange = updateProductDefaults;
+  startSelect.onchange = updateEndWeekFromStart;
   if (!quantityInput.value) updateProductDefaults();
   form.onsubmit = async (event) => {
     event.preventDefault();
