@@ -937,21 +937,44 @@ async function velocitySchedulePlan(form) {
   const production = await api("/api/production-plan");
   const weeks = production.weeks.map(weekMeta).filter((week) => week.week_start >= startWeek && week.week_start <= endWeek);
   if (!weeks.length) throw new Error("No production weeks found in that schedule window.");
-  const existing = production.batches.filter((batch) => String(batch.product_id) === String(product.id)
+  const targetWeeks = evenlySpacedWeeks(weeks, targetCount);
+  const targetSlotsByWeek = targetWeeks.reduce((slots, week) => {
+    const key = String(week.id);
+    slots.set(key, (slots.get(key) || 0) + 1);
+    return slots;
+  }, new Map());
+  const weeksById = new Map(weeks.map((week) => [String(week.id), week]));
+  const existingForProduct = production.batches.filter((batch) => String(batch.product_id) === String(product.id)
     && batch.week_start >= startWeek
     && batch.week_start <= endWeek);
-  const missingCount = Math.max(0, targetCount - existing.length);
-  const overCount = Math.max(0, existing.length - targetCount);
-  const proposed = evenlySpacedWeeks(weeks, missingCount).map((week) => ({
-    week_id: week.id,
-    week_start: week.week_start,
-    label: week.label,
-    batch_type: product.category,
-    product_id: product.id,
-    product_name: product.name,
-    quantity,
-  }));
-  return { product, targetCount, quantity, startWeek, endWeek, weeks, existing, missingCount, overCount, proposed };
+  const existing = existingForProduct.filter((batch) => targetSlotsByWeek.has(String(batch.week_id)));
+  const ignoredExisting = existingForProduct.filter((batch) => !targetSlotsByWeek.has(String(batch.week_id)));
+  const existingCountByWeek = existing.reduce((counts, batch) => {
+    const key = String(batch.week_id);
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return counts;
+  }, new Map());
+  let overCount = 0;
+  const proposed = [];
+  for (const [weekId, slotCount] of targetSlotsByWeek.entries()) {
+    const existingCount = existingCountByWeek.get(weekId) || 0;
+    overCount += Math.max(0, existingCount - slotCount);
+    const week = weeksById.get(weekId);
+    const missingForWeek = Math.max(0, slotCount - existingCount);
+    for (let index = 0; index < missingForWeek; index += 1) {
+      proposed.push({
+        week_id: week.id,
+        week_start: week.week_start,
+        label: week.label,
+        batch_type: product.category,
+        product_id: product.id,
+        product_name: product.name,
+        quantity,
+      });
+    }
+  }
+  const missingCount = proposed.length;
+  return { product, targetCount, quantity, startWeek, endWeek, weeks, targetWeeks, existing, ignoredExisting, missingCount, overCount, proposed };
 }
 
 function renderVelocitySchedulePreview(plan) {
@@ -981,9 +1004,10 @@ function renderVelocitySchedulePreview(plan) {
     ${warning}
     <div class="velocity-schedule-summary">
       <div><strong>${plan.targetCount}</strong><span>Target Entries</span></div>
-      <div><strong>${plan.existing.length}</strong><span>Already Scheduled</span></div>
+      <div><strong>${plan.existing.length}</strong><span>Counted Existing</span></div>
       <div><strong>${plan.proposed.length}</strong><span>Will Add</span></div>
       <div><strong>${plan.overCount}</strong><span>Over Target</span></div>
+      <div><strong>${plan.ignoredExisting?.length || 0}</strong><span>Ignored Existing</span></div>
     </div>
     <div class="grid two">
       <div>
