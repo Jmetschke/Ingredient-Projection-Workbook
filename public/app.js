@@ -10,6 +10,7 @@ const state = {
   rlCalendarMonths: 6,
   forecastMonths: 6,
   selectedFormulaProductId: "",
+  selectedProductionWeekId: "",
 };
 let filterRenderTimer;
 
@@ -246,6 +247,9 @@ async function renderProduction() {
   const filteredBatches = data.batches.filter((batch) => (!state.productionBatchType || batch.batch_type === state.productionBatchType)
     && (!state.productionStartWeek || batch.week_start >= state.productionStartWeek)
     && (!state.productionEndWeek || batch.week_start <= state.productionEndWeek));
+  if (state.selectedProductionWeekId && !filteredWeeks.some((week) => String(week.id) === String(state.selectedProductionWeekId))) {
+    state.selectedProductionWeekId = "";
+  }
   const ingredientReport = await api(`/api/production-ingredient-report${productionReportQuery()}`);
 
   batchTypeSelect.innerHTML = data.batchTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
@@ -277,16 +281,8 @@ async function renderProduction() {
   };
   document.querySelector("#production-ingredient-export").href = `/api/export/production-ingredients${productionReportQuery()}`;
 
-  function fillProductionProducts() {
-    const selectedType = batchTypeSelect.value || data.batchTypes[0];
-    productSelect.innerHTML = data.products
-      .filter((product) => product.category === selectedType)
-      .map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`)
-      .join("");
-  }
-
-  fillProductionProducts();
-  batchTypeSelect.onchange = fillProductionProducts;
+  fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes);
+  batchTypeSelect.onchange = () => fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes);
   batchForm.onsubmit = async (event) => {
     event.preventDefault();
     setMessage("#production-message", "Adding batch...");
@@ -313,7 +309,16 @@ async function renderProduction() {
   ], filteredRows(ingredientReport.rows || [], ["ingredient_name", "quantity_uom"]));
 
   renderProductionTotals(filteredBatches, filteredWeeks);
+  renderProductionWeekFocus(data.batches, filteredWeeks, data.products, data.batchTypes);
   renderProductionBatchEditor(filteredBatches, data.products, weeks, data.batchTypes);
+}
+
+function fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes) {
+  const selectedType = batchTypeSelect.value || batchTypes[0];
+  productSelect.innerHTML = products
+    .filter((product) => product.category === selectedType)
+    .map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`)
+    .join("");
 }
 
 function productionReportQuery() {
@@ -433,6 +438,93 @@ function renderProductionBatchEditor(batches, products, weeks, batchTypes) {
   });
 }
 
+function renderProductionWeekFocus(batches, weeks, products, batchTypes) {
+  const selectedWeek = weeks.find((week) => String(week.id) === String(state.selectedProductionWeekId));
+  const container = document.querySelector("#production-week-focus");
+  if (!selectedWeek) {
+    container.innerHTML = `
+      <div class="focus-panel production-week-focus empty-focus">
+        <h2>Select a week</h2>
+        <p>Choose a calendar week to add or delete batches for that week.</p>
+      </div>
+    `;
+    return;
+  }
+  const scheduled = batches.filter((batch) => String(batch.week_id) === String(selectedWeek.id));
+  container.innerHTML = `
+    <div class="focus-panel production-week-focus">
+      <div class="section-head">
+        <h2>Week ${selectedWeek.weekNumber}</h2>
+        <span>${escapeHtml(selectedWeek.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</span>
+      </div>
+      <form id="production-week-add-form" class="inline-form production-week-add-form">
+        <input name="week_id" type="hidden" value="${escapeHtml(selectedWeek.id)}">
+        <label class="form-field">
+          <span>Batch Type</span>
+          <select name="batch_type" required>
+            ${batchTypes.map((type) => `<option value="${escapeHtml(type)}" ${state.productionBatchType === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="form-field">
+          <span>Product</span>
+          <select name="product_id" required></select>
+        </label>
+        <label class="form-field">
+          <span>Quantity</span>
+          <input name="quantity" type="number" min="1" step="1" required>
+        </label>
+        <button type="submit">Add To Week</button>
+      </form>
+      <div class="week-focus-list">
+        ${scheduled.length ? scheduled.map((batch) => `
+          <div class="week-focus-item" data-batch-id="${batch.id}">
+            <div>
+              <span>${escapeHtml(batch.batch_type)}</span>
+              <strong>${escapeHtml(batch.product_name)}</strong>
+              <em>${qty(batch.quantity)}</em>
+            </div>
+            <button class="small danger delete-week-batch" type="button">Delete</button>
+          </div>
+        `).join("") : `<div class="empty-calendar">No batches scheduled for this week.</div>`}
+      </div>
+    </div>
+  `;
+
+  const form = container.querySelector("#production-week-add-form");
+  const batchTypeSelect = form.querySelector("select[name='batch_type']");
+  const productSelect = form.querySelector("select[name='product_id']");
+  fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes);
+  batchTypeSelect.addEventListener("change", () => fillProductsForBatchType(batchTypeSelect, productSelect, products, batchTypes));
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setMessage("#production-message", `Adding batch to Week ${selectedWeek.weekNumber}...`);
+    try {
+      await api("/api/production-batches", {
+        method: "POST",
+        body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+      });
+      setMessage("#production-message", "Batch added to selected week.", "success");
+      await renderProduction();
+    } catch (error) {
+      setMessage("#production-message", error.message, "error");
+    }
+  });
+  container.querySelectorAll(".delete-week-batch").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest(".week-focus-item");
+      if (!confirm("Delete this scheduled batch?")) return;
+      setMessage("#production-message", "Deleting batch...");
+      try {
+        await api(`/api/production-batches/${row.dataset.batchId}`, { method: "DELETE" });
+        setMessage("#production-message", "Batch deleted.", "success");
+        await renderProduction();
+      } catch (error) {
+        setMessage("#production-message", error.message, "error");
+      }
+    });
+  });
+}
+
 function visibleCalendarWeeks(weeks, monthCount) {
   const today = new Date();
   const firstVisible = saturdayForWeek(isoDate(today));
@@ -498,7 +590,7 @@ function renderProductionCalendar(batches, weeks) {
         ${group.weeks.map((week) => {
           const scheduled = batchesByWeek.get(String(week.id)) || [];
           return `
-            <article class="week-card">
+            <article class="week-card ${String(week.id) === String(state.selectedProductionWeekId) ? "selected" : ""}" role="button" tabindex="0" data-week-id="${week.id}">
               <div class="week-card-head">
                 <strong>Week ${week.weekNumber}</strong>
                 <span>PP ${week.payPeriod}</span>
@@ -520,6 +612,18 @@ function renderProductionCalendar(batches, weeks) {
     </div>
   `).join("");
   document.querySelector("#production-calendar").innerHTML = html || `<div class="empty-calendar">No weeks found for this calendar window.</div>`;
+  document.querySelectorAll("#production-calendar .week-card[data-week-id]").forEach((card) => {
+    const selectWeek = async () => {
+      state.selectedProductionWeekId = card.dataset.weekId;
+      await renderProduction();
+    };
+    card.addEventListener("click", selectWeek);
+    card.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      await selectWeek();
+    });
+  });
 }
 
 async function renderRlScheduledBatches() {

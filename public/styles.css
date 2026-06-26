@@ -534,6 +534,21 @@ tr.warning td {
   gap: 8px;
 }
 
+.week-card[role="button"] {
+  cursor: pointer;
+}
+
+.week-card[role="button"]:hover,
+.week-card[role="button"]:focus {
+  border-color: var(--accent);
+  outline: 2px solid rgba(33, 107, 98, 0.12);
+}
+
+.week-card.selected {
+  border-color: var(--accent);
+  background: #edf7f5;
+}
+
 .week-card.read-only {
   background: #f7faf9;
 }
@@ -617,6 +632,53 @@ tr.warning td {
   grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.85fr);
   gap: 16px;
   align-items: start;
+}
+
+.production-week-focus {
+  margin-bottom: 14px;
+}
+
+.production-week-focus.empty-focus p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.production-week-add-form {
+  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.2fr) minmax(100px, 0.7fr) minmax(120px, auto);
+}
+
+.week-focus-list {
+  display: grid;
+  gap: 8px;
+}
+
+.week-focus-item {
+  align-items: center;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 9px;
+}
+
+.week-focus-item div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.week-focus-item span,
+.week-focus-item em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.week-focus-item strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .editor-table-wrap {
@@ -757,7 +819,7 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .production-workspace, .bom-layout, .bom-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .production-workspace, .bom-layout, .bom-form, .production-week-add-form {
     grid-template-columns: 1fr;
     display: grid;
   }
