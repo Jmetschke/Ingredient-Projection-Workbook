@@ -16,6 +16,7 @@ const state = {
   velocityRows: [],
   velocityInstructions: [],
   velocityProducts: [],
+  velocityPlannedBatches: new Map(),
   velocitySchedulePreview: null,
   selectedFormulaProductId: "",
   selectedProductionWeekId: "",
@@ -830,14 +831,39 @@ function roundedVelocityBatchCount(product) {
   return projection.batches_needed == null ? null : Math.ceil(projection.batches_needed);
 }
 
+function velocityProjectionWindow() {
+  const weeks = velocityScheduleWeekOptions();
+  const startWeek = weeks[0]?.week_start || nextProductionWeekStartIso();
+  const endIndex = Math.min(weeks.length - 1, Math.max(1, state.velocityWeeks) - 1);
+  return {
+    startWeek,
+    endWeek: weeks[endIndex]?.week_start || startWeek,
+  };
+}
+
+async function refreshVelocityPlannedBatches() {
+  const production = await api("/api/production-plan");
+  const { startWeek, endWeek } = velocityProjectionWindow();
+  const counts = new Map();
+  (production.batches || []).forEach((batch) => {
+    if (batch.week_start < startWeek || batch.week_start > endWeek) return;
+    const key = String(batch.product_id);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  state.velocityPlannedBatches = counts;
+  return counts;
+}
+
 async function renderVelocity() {
   const data = await api("/api/velocity-products");
   state.velocityProducts = data.products || [];
   state.velocityRows = data.rows || [];
+  await refreshVelocityPlannedBatches();
   const weeksInput = document.querySelector("#velocity-weeks");
   weeksInput.value = String(state.velocityWeeks);
-  weeksInput.oninput = () => {
+  weeksInput.oninput = async () => {
     state.velocityWeeks = Math.max(1, Number(weeksInput.value) || 1);
+    await refreshVelocityPlannedBatches();
     renderVelocityTable(state.velocityProducts);
     renderVelocityScheduler(state.velocityProducts);
     const form = document.querySelector("#velocity-schedule-form");
@@ -872,6 +898,7 @@ function renderVelocityTable(products) {
       velocity_per_day: projection.velocity_per_day,
       days_to_out: projection.days_to_out,
       batches_needed: projection.batches_needed,
+      planned_batches: state.velocityPlannedBatches.get(String(product.id)) || 0,
     };
   });
   document.querySelector("#velocity-table").innerHTML = table([
@@ -882,6 +909,7 @@ function renderVelocityTable(products) {
     { label: "Days To Out", numeric: true, value: (row) => row.days_to_out == null ? "" : qty(row.days_to_out) },
     { label: "Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : qty(row.batches_needed) },
     { label: "Whole Batches", numeric: true, value: (row) => row.batches_needed == null ? "" : Math.ceil(row.batches_needed) },
+    { label: "Planned Batches", numeric: true, key: "planned_batches" },
     { label: "Actions", value: (row) => `<button class="small secondary velocity-use-schedule" type="button" data-product-id="${row.product_id}">Preview Schedule</button>` },
   ], filteredRows(rows, ["product_name", "batch_type"]));
   document.querySelectorAll(".velocity-use-schedule").forEach((button) => {
@@ -1128,6 +1156,8 @@ function renderVelocitySchedulePreview(plan) {
         });
       }
       state.velocitySchedulePreview = await velocitySchedulePlan(document.querySelector("#velocity-schedule-form"));
+      await refreshVelocityPlannedBatches();
+      renderVelocityTable(state.velocityProducts);
       renderVelocitySchedulePreview(state.velocitySchedulePreview);
       const totalAfterAdd = state.velocitySchedulePreview.existing.length;
       const overMessage = totalAfterAdd > state.velocitySchedulePreview.targetCount
@@ -1148,6 +1178,8 @@ function renderVelocitySchedulePreview(plan) {
         await api(`/api/production-batches/${row.dataset.batchId}`, { method: "DELETE" });
         setMessage("#velocity-schedule-message", "Scheduled batch deleted. Rebuilding preview...", "success");
         state.velocitySchedulePreview = await velocitySchedulePlan(document.querySelector("#velocity-schedule-form"));
+        await refreshVelocityPlannedBatches();
+        renderVelocityTable(state.velocityProducts);
         renderVelocitySchedulePreview(state.velocitySchedulePreview);
       } catch (error) {
         setMessage("#velocity-schedule-message", error.message, "error");
