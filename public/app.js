@@ -970,24 +970,13 @@ async function velocitySchedulePlan(form) {
     return slots;
   }, new Map());
   const weeksById = new Map(weeks.map((week) => [String(week.id), week]));
-  const existingForProduct = production.batches.filter((batch) => String(batch.product_id) === String(product.id)
+  const existing = production.batches.filter((batch) => String(batch.product_id) === String(product.id)
     && batch.week_start >= startWeek
     && batch.week_start <= endWeek);
-  const existing = existingForProduct.filter((batch) => targetSlotsByWeek.has(String(batch.week_id)));
-  const ignoredExisting = existingForProduct.filter((batch) => !targetSlotsByWeek.has(String(batch.week_id)));
-  const existingCountByWeek = existing.reduce((counts, batch) => {
-    const key = String(batch.week_id);
-    counts.set(key, (counts.get(key) || 0) + 1);
-    return counts;
-  }, new Map());
-  let overCount = 0;
   const proposed = [];
   for (const [weekId, slotCount] of targetSlotsByWeek.entries()) {
-    const existingCount = existingCountByWeek.get(weekId) || 0;
-    overCount += Math.max(0, existingCount - slotCount);
     const week = weeksById.get(weekId);
-    const missingForWeek = Math.max(0, slotCount - existingCount);
-    for (let index = 0; index < missingForWeek; index += 1) {
+    for (let index = 0; index < slotCount; index += 1) {
       proposed.push({
         week_id: week.id,
         week_start: week.week_start,
@@ -999,7 +988,8 @@ async function velocitySchedulePlan(form) {
       });
     }
   }
-  const missingCount = proposed.length;
+  const selectedTotal = existing.length + proposed.length;
+  const overCount = Math.max(0, selectedTotal - targetCount);
   const projection = velocityProjection(product);
   const stockOutDate = projection.days_to_out == null ? "" : isoDate(addDays(new Date(), Math.ceil(projection.days_to_out)));
   const firstBatchTargetDate = projection.days_to_out == null ? "" : isoDate(addDays(new Date(), Math.ceil(projection.days_to_out) - 10));
@@ -1012,10 +1002,9 @@ async function velocitySchedulePlan(form) {
     weeks,
     targetWeeks,
     existing,
-    ignoredExisting,
-    missingCount,
     overCount,
     proposed,
+    selectedTotal,
     projectedUnits: projection.projected_units,
     velocityPerDay: projection.velocity_per_day,
     daysToOut: projection.days_to_out,
@@ -1026,12 +1015,11 @@ async function velocitySchedulePlan(form) {
 }
 
 function renderVelocitySchedulePreview(plan) {
-  const canSchedule = plan.proposed.length > 0 && plan.overCount === 0;
-  const warning = plan.overCount > 0
-    ? `<div class="form-message error">This window is over the velocity target by ${plan.overCount} batch entr${plan.overCount === 1 ? "y" : "ies"}. Delete ${plan.overCount} entr${plan.overCount === 1 ? "y" : "ies"} before adding more.</div>`
-    : plan.missingCount === 0
-      ? `<div class="form-message success">This window already matches the velocity target.</div>`
-      : `<div class="form-message success">${plan.proposed.length} batch entr${plan.proposed.length === 1 ? "y" : "ies"} ready to add.</div>`;
+  const initialSelectedTotal = plan.existing.length + plan.proposed.length;
+  const initialOverCount = Math.max(0, initialSelectedTotal - plan.targetCount);
+  const warning = initialOverCount > 0
+    ? `<div id="velocity-preview-alert" class="form-message error">There are too many entries selected. Existing plus recommended batches total ${initialSelectedTotal}, which is ${initialOverCount} over the velocity target of ${plan.targetCount}. Clear recommended batches or delete existing planner entries until this alert clears.</div>`
+    : `<div id="velocity-preview-alert" class="form-message success">Existing plus selected recommended batches total ${initialSelectedTotal} against a velocity target of ${plan.targetCount}.</div>`;
   const existingRows = plan.existing.map((batch) => `
     <tr data-batch-id="${batch.id}">
       <td>${escapeHtml(batch.week_start)}</td>
@@ -1052,10 +1040,10 @@ function renderVelocitySchedulePreview(plan) {
     ${warning}
     <div class="velocity-schedule-summary">
       <div><strong>${plan.targetCount}</strong><span>Target Entries</span></div>
-      <div><strong>${plan.existing.length}</strong><span>Counted Existing</span></div>
-      <div><strong>${plan.proposed.length}</strong><span>Will Add</span></div>
-      <div><strong>${plan.overCount}</strong><span>Over Target</span></div>
-      <div><strong>${plan.ignoredExisting?.length || 0}</strong><span>Ignored Existing</span></div>
+      <div><strong>${plan.existing.length}</strong><span>Scheduled Existing</span></div>
+      <div><strong id="velocity-selected-count">${plan.proposed.length}</strong><span>Selected Recommended</span></div>
+      <div><strong id="velocity-selected-total">${initialSelectedTotal}</strong><span>Total After Add</span></div>
+      <div><strong id="velocity-over-count">${initialOverCount}</strong><span>Over Target</span></div>
       <div><strong>${plan.firstScheduleWeek ? escapeHtml(plan.firstScheduleWeek.week_start) : ""}</strong><span>Target First Week</span></div>
     </div>
     ${plan.stockOutDate ? `<div class="source-note">Projected units ${qty(plan.projectedUnits)} at ${qty(plan.velocityPerDay)} units/day estimates an out date of ${escapeHtml(plan.stockOutDate)}. Scheduling begins in the week containing ${escapeHtml(plan.firstBatchTargetDate)}.</div>` : ""}
@@ -1071,7 +1059,7 @@ function renderVelocitySchedulePreview(plan) {
         <div class="table-wrap velocity-schedule-table">
           <table><thead><tr><th>Select</th><th>Week</th><th>Batch</th><th class="numeric">Qty</th></tr></thead><tbody>${proposedRows || `<tr><td colspan="4">No new entries needed</td></tr>`}</tbody></table>
         </div>
-        ${canSchedule ? `
+        ${plan.proposed.length ? `
           <div class="velocity-preview-actions">
             <button id="velocity-select-all-proposed" class="small secondary" type="button">Select All</button>
             <button id="velocity-clear-proposed" class="small ghost" type="button">Clear</button>
@@ -1084,13 +1072,41 @@ function renderVelocitySchedulePreview(plan) {
   const selectedIndexes = () => Array.from(document.querySelectorAll(".velocity-proposed-select:checked"))
     .map((input) => Number(input.closest("tr").dataset.proposedIndex))
     .filter((index) => Number.isInteger(index));
+  const refreshSelectionState = () => {
+    const selectedCount = selectedIndexes().length;
+    const selectedTotal = plan.existing.length + selectedCount;
+    const overCount = Math.max(0, selectedTotal - plan.targetCount);
+    const alert = document.querySelector("#velocity-preview-alert");
+    document.querySelector("#velocity-selected-count").textContent = String(selectedCount);
+    document.querySelector("#velocity-selected-total").textContent = String(selectedTotal);
+    document.querySelector("#velocity-over-count").textContent = String(overCount);
+    if (alert) {
+      alert.className = `form-message ${overCount > 0 ? "error" : "success"}`;
+      alert.textContent = overCount > 0
+        ? `There are too many entries selected. Existing plus selected recommended batches total ${selectedTotal}, which is ${overCount} over the velocity target of ${plan.targetCount}.`
+        : `Existing plus selected recommended batches total ${selectedTotal} against a velocity target of ${plan.targetCount}.`;
+    }
+    const addButton = document.querySelector("#velocity-add-selected");
+    if (addButton) addButton.disabled = overCount > 0;
+    return { selectedCount, selectedTotal, overCount };
+  };
   document.querySelector("#velocity-select-all-proposed")?.addEventListener("click", () => {
     document.querySelectorAll(".velocity-proposed-select").forEach((input) => { input.checked = true; });
+    refreshSelectionState();
   });
   document.querySelector("#velocity-clear-proposed")?.addEventListener("click", () => {
     document.querySelectorAll(".velocity-proposed-select").forEach((input) => { input.checked = false; });
+    refreshSelectionState();
+  });
+  document.querySelectorAll(".velocity-proposed-select").forEach((input) => {
+    input.addEventListener("change", refreshSelectionState);
   });
   document.querySelector("#velocity-add-selected")?.addEventListener("click", async () => {
+    const selectionState = refreshSelectionState();
+    if (selectionState.overCount > 0) {
+      setMessage("#velocity-schedule-message", "There are too many batches selected for this velocity target. Clear recommended batches or delete existing entries first.", "error");
+      return;
+    }
     const indexes = selectedIndexes();
     if (!indexes.length) {
       setMessage("#velocity-schedule-message", "Select at least one proposed batch to add.", "error");
@@ -1113,14 +1129,16 @@ function renderVelocitySchedulePreview(plan) {
       }
       state.velocitySchedulePreview = await velocitySchedulePlan(document.querySelector("#velocity-schedule-form"));
       renderVelocitySchedulePreview(state.velocitySchedulePreview);
-      const overMessage = state.velocitySchedulePreview.overCount > 0
-        ? ` This window is now over target by ${state.velocitySchedulePreview.overCount}.`
+      const totalAfterAdd = state.velocitySchedulePreview.existing.length;
+      const overMessage = totalAfterAdd > state.velocitySchedulePreview.targetCount
+        ? ` This window is now over target by ${totalAfterAdd - state.velocitySchedulePreview.targetCount}.`
         : "";
       setMessage("#velocity-schedule-message", `Added ${indexes.length} selected batch entr${indexes.length === 1 ? "y" : "ies"}.${overMessage}`, "success");
     } catch (error) {
       setMessage("#velocity-schedule-message", error.message, "error");
     }
   });
+  refreshSelectionState();
   document.querySelectorAll(".delete-velocity-existing").forEach((button) => {
     button.addEventListener("click", async () => {
       const row = button.closest("tr");
