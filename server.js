@@ -5,7 +5,7 @@ import express from "express";
 import XLSX from "xlsx";
 import { all, one, run } from "./src/db.js";
 import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
-import { BATCH_TYPES, PRODUCT_ALIASES } from "./src/master-products.js";
+import { BATCH_TYPES, PRODUCT_ALIASES, VELOCITY_BATCH_UNIT_MULTIPLIERS } from "./src/master-products.js";
 import { bomUomForIngredient } from "./src/master-ingredients.js";
 
 dotenv.config();
@@ -180,6 +180,16 @@ async function latestVelocityRows() {
     FROM latest_velocity_rows
     ORDER BY id
   `);
+}
+
+function withVelocityBatchYield(product) {
+  const batchSize = Number(product.batch_size || 0);
+  const multiplier = VELOCITY_BATCH_UNIT_MULTIPLIERS.get(product.name) || 1;
+  return {
+    ...product,
+    velocity_batch_multiplier: multiplier,
+    velocity_units_per_batch: batchSize > 0 ? batchSize * multiplier : null,
+  };
 }
 
 async function replaceLatestVelocityRows(rows) {
@@ -912,14 +922,15 @@ app.get("/api/forecast", async (req, res) => {
 
 app.get("/api/velocity-products", async (req, res) => {
   try {
+    const products = await all(`
+      SELECT p.id, p.name, p.sku, p.category, p.active, pbs.batch_size
+      FROM products p
+      LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
+      WHERE p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
+      ORDER BY p.category, p.name
+    `);
     ok(res, {
-      products: await all(`
-        SELECT p.id, p.name, p.sku, p.category, p.active, pbs.batch_size
-        FROM products p
-        LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
-        WHERE p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
-        ORDER BY p.category, p.name
-      `),
+      products: products.map(withVelocityBatchYield),
       rows: await latestVelocityRows(),
     });
   } catch (error) {

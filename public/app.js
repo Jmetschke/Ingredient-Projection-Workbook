@@ -816,12 +816,13 @@ function velocityProjection(product) {
   const imported = velocityRowForProduct(product);
   const velocity = Number(imported?.velocity_per_day || 0);
   const projectedUnits = Number(imported?.projected_units || 0);
-  const batchSize = Number(product.batch_size || 0);
+  const batchSize = Number(product.velocity_units_per_batch || product.batch_size || 0);
   const daysToOut = imported && velocity > 0 && projectedUnits >= 0 ? projectedUnits / velocity : null;
   return {
     projected_units: imported && Number.isFinite(projectedUnits) ? projectedUnits : null,
     velocity_per_day: imported ? velocity : null,
     days_to_out: daysToOut,
+    velocity_units_per_batch: batchSize > 0 ? batchSize : null,
     batches_needed: imported && batchSize > 0 ? (velocity * weeks * 7) / batchSize : null,
   };
 }
@@ -897,6 +898,7 @@ function renderVelocityTable(products) {
       projected_units: projection.projected_units,
       velocity_per_day: projection.velocity_per_day,
       days_to_out: projection.days_to_out,
+      velocity_units_per_batch: projection.velocity_units_per_batch,
       batches_needed: projection.batches_needed,
       planned_batches: state.velocityPlannedBatches.get(String(product.id)) || 0,
     };
@@ -907,6 +909,7 @@ function renderVelocityTable(products) {
     { label: "Projected Units", numeric: true, value: (row) => row.projected_units == null ? "" : qty(row.projected_units) },
     { label: "Vel / Day", numeric: true, value: (row) => row.velocity_per_day == null ? "" : qty(row.velocity_per_day) },
     { label: "Days To Out", numeric: true, value: (row) => row.days_to_out == null ? "" : qty(row.days_to_out) },
+    { label: "Units / Batch", numeric: true, value: (row) => row.velocity_units_per_batch == null ? "" : qty(row.velocity_units_per_batch) },
     { label: "Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : qty(row.batches_needed) },
     { label: "Whole Batches", numeric: true, value: (row) => row.batches_needed == null ? "" : Math.ceil(row.batches_needed) },
     { label: "Planned Batches", numeric: true, key: "planned_batches" },

@@ -60,6 +60,10 @@ export const STANDARD_BATCH_SIZES = new Map([
   ["Snackbar Vape - Watermelon Lychee 1g", 1500],
 ]);
 
+export const VELOCITY_BATCH_UNIT_MULTIPLIERS = new Map([
+  ["Micro Dots", 9.44],
+]);
+
 export const PRODUCT_ALIASES = new Map([
   ["Space Chunk ALPHA OG 2 chunk (units)", "Alpha Chunk - 2pk"],
   ["Space Chunk OG 1 chunk (pcs)", "Chill Chunk - 1pk"],
