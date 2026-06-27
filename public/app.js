@@ -292,6 +292,9 @@ async function renderProduction() {
     await renderProduction();
   };
   document.querySelector("#production-ingredient-export").href = `/api/export/production-ingredients${productionReportQuery()}`;
+  document.querySelector("#production-print-calendar").onclick = () => {
+    printProductionCalendarReport(filteredBatches, filteredWeeks);
+  };
 
   fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes, batchForm.querySelector("input[name='quantity']"));
   batchTypeSelect.onchange = () => fillProductsForBatchType(batchTypeSelect, productSelect, data.products, data.batchTypes, batchForm.querySelector("input[name='quantity']"));
@@ -607,9 +610,13 @@ function nextProductionWeekStartIso() {
   return isoDate(addDays(parseIsoDate(currentWeekStartIso()), 7));
 }
 
-function renderProductionCalendar(batches, weeks) {
+function productionCalendarMarkup(batches, weeks, options = {}) {
   const batchesByWeek = new Map();
-  batches.forEach((batch) => {
+  [...batches]
+    .sort((a, b) => String(a.week_start || "").localeCompare(String(b.week_start || ""))
+      || String(a.batch_type || "").localeCompare(String(b.batch_type || ""))
+      || String(a.product_name || "").localeCompare(String(b.product_name || "")))
+    .forEach((batch) => {
     const key = String(batch.week_id);
     if (!batchesByWeek.has(key)) batchesByWeek.set(key, []);
     batchesByWeek.get(key).push(batch);
@@ -619,14 +626,14 @@ function renderProductionCalendar(batches, weeks) {
     groups.get(week.monthKey).weeks.push(week);
     return groups;
   }, new Map());
-  const html = Array.from(monthGroups.values()).map((group) => `
+  return Array.from(monthGroups.values()).map((group) => `
     <div class="calendar-month">
       <h3>${escapeHtml(group.label)}</h3>
       <div class="week-grid">
         ${group.weeks.map((week) => {
           const scheduled = batchesByWeek.get(String(week.id)) || [];
           return `
-            <article class="week-card ${String(week.id) === String(state.selectedProductionWeekId) ? "selected" : ""}" role="button" tabindex="0" data-week-id="${week.id}">
+            <article class="week-card ${!options.printable && String(week.id) === String(state.selectedProductionWeekId) ? "selected" : ""}" ${options.printable ? "" : `role="button" tabindex="0" data-week-id="${week.id}"`}>
               <div class="week-card-head">
                 <strong>Week ${week.weekNumber}</strong>
                 <span>PP ${week.payPeriod}</span>
@@ -647,6 +654,10 @@ function renderProductionCalendar(batches, weeks) {
       </div>
     </div>
   `).join("");
+}
+
+function renderProductionCalendar(batches, weeks) {
+  const html = productionCalendarMarkup(batches, weeks);
   document.querySelector("#production-calendar").innerHTML = html || `<div class="empty-calendar">No weeks found for this calendar window.</div>`;
   document.querySelectorAll("#production-calendar .week-card[data-week-id]").forEach((card) => {
     const selectWeek = async () => {
@@ -660,6 +671,74 @@ function renderProductionCalendar(batches, weeks) {
       await selectWeek();
     });
   });
+}
+
+function printProductionCalendarReport(batches, weeks) {
+  const printWindow = window.open("", "_blank", "width=1200,height=900");
+  if (!printWindow) {
+    setMessage("#production-message", "Allow pop-ups to print the schedule report.", "error");
+    return;
+  }
+  const typeLabel = state.productionBatchType || "Both";
+  const startLabel = weeks[0]?.label || state.productionStartWeek || "";
+  const endLabel = weeks.at(-1)?.label || state.productionEndWeek || "";
+  const totalBatches = batches.length;
+  const html = productionCalendarMarkup(batches, weeks, { printable: true });
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Production Schedule Report</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 24px; color: #172026; font-family: Arial, sans-serif; background: #fff; }
+          header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 2px solid #172026; padding-bottom: 12px; margin-bottom: 18px; }
+          h1 { margin: 0 0 6px; font-size: 22px; }
+          h2, h3 { break-after: avoid; }
+          .meta { color: #5f6c72; font-size: 12px; line-height: 1.5; text-align: right; }
+          .calendar-month { display: grid; gap: 10px; margin-bottom: 18px; break-inside: avoid; page-break-inside: avoid; }
+          .calendar-month h3 { margin: 0; font-size: 15px; }
+          .week-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+          .week-card { border: 1px solid #cfd8dc; border-radius: 6px; min-height: 132px; padding: 10px; display: grid; grid-template-rows: auto auto 1fr; gap: 7px; break-inside: avoid; page-break-inside: avoid; }
+          .week-card-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+          .week-card-head strong { font-size: 13px; }
+          .week-card-head span, .week-range, .empty-week { color: #5f6c72; font-size: 11px; }
+          .week-batches { display: grid; gap: 5px; align-content: start; }
+          .batch-chip { border: 1px solid #d9e2e5; border-radius: 5px; padding: 5px 6px; display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; font-size: 11px; }
+          .batch-chip span { color: #216b62; font-weight: 700; }
+          .batch-chip strong { font-size: 11px; }
+          .batch-chip em { color: #172026; font-style: normal; font-weight: 700; text-align: right; }
+          .empty-calendar { color: #5f6c72; border: 1px dashed #cfd8dc; padding: 14px; }
+          @page { margin: 0.45in; }
+          @media print {
+            body { padding: 0; }
+            .calendar-month { break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <header>
+          <div>
+            <h1>Production Schedule Report</h1>
+            <div>${escapeHtml(startLabel)} to ${escapeHtml(endLabel)}</div>
+          </div>
+          <div class="meta">
+            <div>Batch Type: ${escapeHtml(typeLabel)}</div>
+            <div>Total Scheduled Batches: ${totalBatches}</div>
+            <div>Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+          </div>
+        </header>
+        <main>${html || `<div class="empty-calendar">No weeks found for this calendar window.</div>`}</main>
+        <script>
+          window.addEventListener("load", () => {
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
 }
 
 async function renderRlScheduledBatches() {

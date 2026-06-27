@@ -301,7 +301,8 @@ tr.warning td {
 }
 
 .inline-form button,
-.production-tools .button-link {
+.production-tools .button-link,
+.production-tools button {
   align-self: end;
 }
 
