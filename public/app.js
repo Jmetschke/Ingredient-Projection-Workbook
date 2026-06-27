@@ -854,8 +854,13 @@ async function renderForecast() {
     state.forecastIngredientType = typeSelect.value;
     renderForecastTable(state.forecastRows);
   };
+  document.querySelector("#forecast-print-report").onclick = () => {
+    printForecastReport(forecastFilteredRows(state.forecastRows));
+  };
   const data = await api(`/api/forecast?months=${state.forecastMonths}`);
-  document.querySelector("#forecast-window").textContent = `${data.filters.start} through ${data.filters.end}`;
+  const forecastWindow = document.querySelector("#forecast-window");
+  forecastWindow.textContent = `${data.filters.start} through ${data.filters.end}`;
+  forecastWindow.className = "source-note";
   state.forecastRows = data.rows || [];
   document.querySelector("#forecast-ingredient-options").innerHTML = [...new Set(state.forecastRows.map((row) => row.ingredient_name).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b))
@@ -864,7 +869,7 @@ async function renderForecast() {
   renderForecastTable(state.forecastRows);
 }
 
-function renderForecastTable(rows) {
+function forecastFilteredRows(rows) {
   const keyword = state.forecastFilter.toLowerCase();
   const ingredientType = state.forecastIngredientType;
   const typeOrder = { Hijnx: 1, SB: 2, "SB/Hijnx": 3 };
@@ -874,6 +879,11 @@ function renderForecastTable(rows) {
     return matchesKeyword && matchesType;
   }).sort((a, b) => (typeOrder[a.ingredient_type] || 9) - (typeOrder[b.ingredient_type] || 9)
     || String(a.ingredient_name || "").localeCompare(String(b.ingredient_name || "")));
+  return filteredRows(filtered, ["ingredient_name", "ingredient_type", "quantity_uom", "products"]);
+}
+
+function renderForecastTable(rows) {
+  const filtered = forecastFilteredRows(rows);
   document.querySelector("#forecast-table").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Type", key: "ingredient_type" },
@@ -883,7 +893,96 @@ function renderForecastTable(rows) {
     { label: "Products", key: "products" },
     { label: "First Week", key: "first_week" },
     { label: "Last Week", key: "last_week" },
-  ], filteredRows(filtered, ["ingredient_name", "ingredient_type", "quantity_uom", "products"]));
+  ], filtered);
+}
+
+function printForecastReport(rows) {
+  const printWindow = window.open("", "_blank", "width=1100,height=850");
+  if (!printWindow) {
+    setMessage("#forecast-window", "Allow pop-ups to print the forecast report.", "error");
+    return;
+  }
+  const windowLabel = document.querySelector("#forecast-window").textContent || "";
+  const typeLabel = state.forecastIngredientType || "All types";
+  const searchLabel = state.forecastFilter || "None";
+  const totalQtyByUom = rows.reduce((totals, row) => {
+    const uom = row.quantity_uom || "units";
+    totals.set(uom, (totals.get(uom) || 0) + Number(row.required_qty || 0));
+    return totals;
+  }, new Map());
+  const totalsHtml = Array.from(totalQtyByUom.entries()).map(([uom, amount]) => (
+    `<div><strong>${qty(amount)}</strong><span>${escapeHtml(uom)}</span></div>`
+  )).join("");
+  const rowsHtml = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.ingredient_name)}</td>
+      <td>${escapeHtml(row.ingredient_type)}</td>
+      <td class="numeric">${qty(row.required_qty)}</td>
+      <td>${escapeHtml(row.quantity_uom)}</td>
+      <td class="numeric">${escapeHtml(row.scheduled_batches)}</td>
+      <td>${escapeHtml(row.products || "")}</td>
+      <td>${escapeHtml(row.first_week || "")}</td>
+      <td>${escapeHtml(row.last_week || "")}</td>
+    </tr>
+  `).join("");
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Ingredient Forecast Report</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 24px; color: #172026; font-family: Arial, sans-serif; background: #fff; }
+          header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 2px solid #172026; padding-bottom: 12px; margin-bottom: 16px; }
+          h1 { margin: 0 0 6px; font-size: 22px; }
+          .meta { color: #5f6c72; font-size: 12px; line-height: 1.5; text-align: right; }
+          .totals { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+          .totals div { border: 1px solid #d9e2e5; border-radius: 6px; padding: 8px 10px; min-width: 120px; display: grid; gap: 2px; }
+          .totals strong { font-size: 16px; }
+          .totals span { color: #5f6c72; font-size: 11px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th, td { border: 1px solid #d9e2e5; padding: 6px 7px; vertical-align: top; text-align: left; }
+          th { background: #eef3f2; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+          .numeric { text-align: right; white-space: nowrap; }
+          .empty { color: #5f6c72; border: 1px dashed #cfd8dc; padding: 14px; }
+          tr { break-inside: avoid; page-break-inside: avoid; }
+          @page { margin: 0.45in; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <header>
+          <div>
+            <h1>Ingredient Forecast Report</h1>
+            <div>${escapeHtml(windowLabel)}</div>
+          </div>
+          <div class="meta">
+            <div>Time Period: ${state.forecastMonths} month${state.forecastMonths === 1 ? "" : "s"}</div>
+            <div>Search: ${escapeHtml(searchLabel)}</div>
+            <div>Item Type: ${escapeHtml(typeLabel)}</div>
+            <div>Rows: ${rows.length}</div>
+            <div>Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+          </div>
+        </header>
+        ${totalsHtml ? `<section class="totals">${totalsHtml}</section>` : ""}
+        ${rows.length ? `
+          <table>
+            <thead>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        ` : `<div class="empty">No forecast rows match the current filters.</div>`}
+        <script>
+          window.addEventListener("load", () => {
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
 }
 
 function velocityRowForProduct(product) {
