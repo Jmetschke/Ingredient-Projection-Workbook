@@ -683,9 +683,74 @@ tr.warning td {
 
 .forecast-tools {
   display: grid;
-  grid-template-columns: minmax(140px, 170px) minmax(210px, 1fr) minmax(140px, 170px) repeat(3, minmax(150px, auto)) minmax(180px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
   align-items: end;
+}
+
+#forecast-table .table-wrap {
+  max-height: none;
+  overflow-x: hidden;
+}
+
+#forecast-table table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+#forecast-table th,
+#forecast-table td {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  vertical-align: top;
+}
+
+#forecast-table th:nth-child(1),
+#forecast-table td:nth-child(1) {
+  width: 20%;
+}
+
+#forecast-table th:nth-child(2),
+#forecast-table td:nth-child(2) {
+  width: 8%;
+}
+
+#forecast-table th:nth-child(3),
+#forecast-table td:nth-child(3) {
+  width: 11%;
+}
+
+#forecast-table th:nth-child(4),
+#forecast-table td:nth-child(4) {
+  width: 12%;
+}
+
+#forecast-table th:nth-child(5),
+#forecast-table td:nth-child(5),
+#forecast-table th:nth-child(6),
+#forecast-table td:nth-child(6) {
+  width: 7%;
+}
+
+#forecast-table th:nth-child(7),
+#forecast-table td:nth-child(7) {
+  width: 15%;
+}
+
+#forecast-table th:nth-child(8),
+#forecast-table td:nth-child(8),
+#forecast-table th:nth-child(9),
+#forecast-table td:nth-child(9) {
+  width: 10%;
+}
+
+#forecast-table td:first-child,
+#forecast-table th:first-child {
+  position: static;
+}
+
+#forecast-table .numeric {
+  white-space: nowrap;
 }
 
 .unmatched-panel {
