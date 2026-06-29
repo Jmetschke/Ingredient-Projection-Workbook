@@ -119,6 +119,7 @@ button, .export-buttons a, .button-link {
   align-items: center;
   justify-content: center;
   min-height: 40px;
+  text-align: center;
 }
 
 button.small {
@@ -623,37 +624,44 @@ tr.warning td {
   margin-top: -8px;
 }
 
+.production-tools .source-note,
+.forecast-tools .source-note,
+.velocity-tools .source-note {
+  align-self: center;
+  margin-top: 0;
+}
+
 .inventory-add-form {
-  grid-template-columns: repeat(3, minmax(150px, 1fr)) minmax(120px, auto);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
 .production-tools {
   display: grid;
-  grid-template-columns: repeat(4, minmax(140px, 1fr)) minmax(180px, auto);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
   align-items: end;
 }
 
 .forecast-tools {
   display: grid;
-  grid-template-columns: minmax(150px, 190px) minmax(220px, 1fr) minmax(150px, 190px) minmax(180px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 190px) minmax(220px, 1fr) minmax(150px, 190px) minmax(180px, auto) minmax(180px, 1fr);
   gap: 12px;
   align-items: end;
 }
 
 .velocity-tools {
   display: grid;
-  grid-template-columns: minmax(140px, 180px) minmax(240px, 1fr) minmax(120px, auto);
+  grid-template-columns: minmax(140px, 180px) minmax(240px, 1fr) minmax(130px, auto);
   gap: 10px;
   align-items: end;
 }
 
 .velocity-size-form {
-  grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) minmax(120px, auto);
+  grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) minmax(130px, auto);
 }
 
 .velocity-schedule-form {
-  grid-template-columns: minmax(220px, 1.2fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(100px, auto) minmax(150px, auto);
+  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(120px, 0.7fr)) repeat(2, minmax(170px, 1fr)) minmax(120px, auto);
 }
 
 .velocity-schedule-summary {
@@ -704,7 +712,7 @@ tr.warning td {
 
 .production-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.85fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(340px, 0.8fr);
   gap: 16px;
   align-items: start;
 }
@@ -886,7 +894,7 @@ tr.warning td {
 }
 
 .formula-product-form {
-  grid-template-columns: minmax(240px, 1fr) minmax(140px, 180px) minmax(150px, 220px) minmax(120px, auto);
+  grid-template-columns: minmax(240px, 1fr) minmax(140px, 180px) minmax(150px, 220px) minmax(130px, auto);
 }
 
 .stack-form {
@@ -922,6 +930,9 @@ pre {
 
   .production-tools,
   .forecast-tools,
+  .velocity-tools,
+  .velocity-size-form,
+  .formula-product-form,
   .velocity-schedule-form {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
@@ -951,6 +962,7 @@ pre {
     overflow-x: auto;
     padding-bottom: 2px;
     scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
   }
 
   nav button {
@@ -978,6 +990,20 @@ pre {
   .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .formula-product-form, .production-week-add-form {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .inline-form button,
+  .production-tools .button-link,
+  .production-tools button,
+  .forecast-tools button,
+  .velocity-tools button,
+  .velocity-size-form button,
+  .velocity-schedule-form button,
+  .bom-form button,
+  .bom-copy-form button,
+  .formula-product-form button,
+  .inventory-add-form button {
+    width: 100%;
   }
 
   .bom-batch-panel {
@@ -1019,6 +1045,15 @@ pre {
   .rl-calendar-head {
     align-items: flex-start;
     display: grid;
+  }
+
+  .rl-calendar-panel {
+    padding: 10px;
+  }
+
+  .rl-calendar-grid {
+    grid-template-columns: repeat(7, minmax(126px, 1fr));
+    min-width: 882px;
   }
 
   section {
@@ -1116,6 +1151,28 @@ pre {
     font-size: 11px;
     font-weight: 800;
     text-transform: uppercase;
+  }
+
+  .velocity-schedule-table {
+    max-height: 260px;
+  }
+
+  .velocity-schedule-table table,
+  .editor-table,
+  .velocity-size-table-wrap table {
+    min-width: 560px;
+  }
+
+  .row-actions {
+    flex-wrap: wrap;
+  }
+
+  .row-actions button {
+    flex: 1 1 96px;
+  }
+
+  .batch-chip {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   td.numeric,
