@@ -1844,6 +1844,86 @@ document.querySelector("#formula-copy-form").addEventListener("submit", async (e
   }
 });
 
+// PWA: store the deferred browser install prompt so the internal install button can trigger it.
+let deferredInstallPrompt = null;
+
+function isRunningStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function updateInstallButton() {
+  const button = document.querySelector("#install-app");
+  if (!button) return;
+  if (isRunningStandalone()) {
+    button.textContent = "App Installed";
+    button.disabled = true;
+    return;
+  }
+  button.textContent = deferredInstallPrompt ? "Install App" : "How To Install";
+  button.disabled = false;
+}
+
+function openInstallDialog() {
+  const dialog = document.querySelector("#install-dialog");
+  const nativeActions = document.querySelector("#install-native-actions");
+  const summary = document.querySelector("#install-summary");
+  if (!dialog || !nativeActions || !summary) return;
+  nativeActions.hidden = !deferredInstallPrompt;
+  summary.textContent = deferredInstallPrompt
+    ? "Use Install Now for the browser prompt, or follow the manual steps for your device."
+    : "Use the steps below to add this internal app to your home screen.";
+  dialog.hidden = false;
+}
+
+function closeInstallDialog() {
+  const dialog = document.querySelector("#install-dialog");
+  if (dialog) dialog.hidden = true;
+}
+
+async function runNativeInstallPrompt() {
+  if (!deferredInstallPrompt) {
+    openInstallDialog();
+    return;
+  }
+  const promptEvent = deferredInstallPrompt;
+  deferredInstallPrompt = null;
+  promptEvent.prompt();
+  await promptEvent.userChoice.catch(() => null);
+  updateInstallButton();
+  closeInstallDialog();
+}
+
+// PWA: Chrome/Edge/Android fire beforeinstallprompt when manifest and service worker are installable.
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  updateInstallButton();
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  updateInstallButton();
+  closeInstallDialog();
+});
+
+document.querySelector("#install-app").addEventListener("click", () => {
+  if (deferredInstallPrompt) {
+    runNativeInstallPrompt();
+  } else {
+    openInstallDialog();
+  }
+});
+
+document.querySelector("#install-native").addEventListener("click", runNativeInstallPrompt);
+document.querySelector("#install-close").addEventListener("click", closeInstallDialog);
+document.querySelector("#install-dialog").addEventListener("click", (event) => {
+  if (event.target.id === "install-dialog") closeInstallDialog();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeInstallDialog();
+});
+updateInstallButton();
+
 // PWA: register the online-first service worker without blocking the live app startup.
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

@@ -37,9 +37,55 @@
         </div>
         <div class="filters">
           <input id="global-filter" type="search" placeholder="Filter rows">
+          <!-- PWA: install helper opens browser install prompt or device-specific instructions. -->
+          <button id="install-app" type="button">Install App</button>
           <button id="refresh">Refresh</button>
         </div>
       </header>
+
+      <!-- PWA: instruction dialog for browsers that do not expose the native install prompt. -->
+      <div id="install-dialog" class="focus-backdrop install-backdrop" hidden>
+        <section class="focus-panel install-panel" role="dialog" aria-modal="true" aria-labelledby="install-title">
+          <div class="section-head">
+            <h2 id="install-title">Install Production Planning</h2>
+            <button id="install-close" class="small ghost" type="button">Close</button>
+          </div>
+          <p id="install-summary" class="install-summary">Add this internal app to your home screen for standalone access.</p>
+          <div id="install-native-actions" class="install-native-actions" hidden>
+            <button id="install-native" type="button">Install Now</button>
+          </div>
+          <div class="install-instructions">
+            <div>
+              <h3>iPhone or iPad Safari</h3>
+              <ol>
+                <li>Open this Render HTTPS app link in Safari.</li>
+                <li>Tap the Share button.</li>
+                <li>Tap Add to Home Screen.</li>
+                <li>Tap Add, then launch it from the new home-screen icon.</li>
+              </ol>
+            </div>
+            <div>
+              <h3>Android Chrome</h3>
+              <ol>
+                <li>Open this Render HTTPS app link in Chrome.</li>
+                <li>Tap the three-dot menu.</li>
+                <li>Tap Install app or Add to Home screen.</li>
+                <li>Confirm, then launch it from the app icon.</li>
+              </ol>
+            </div>
+            <div>
+              <h3>Desktop Chrome or Edge</h3>
+              <ol>
+                <li>Open this Render HTTPS app link.</li>
+                <li>Click the install icon in the address bar, or open the browser menu.</li>
+                <li>Choose Install Production Planning.</li>
+                <li>Launch it from the installed apps list or desktop shortcut.</li>
+              </ol>
+            </div>
+          </div>
+          <p class="source-note">This is a private internal PWA install. It does not use the App Store or Play Store, and live planner data still loads from the Render backend.</p>
+        </section>
+      </div>
 
       <section id="dashboard" class="view active">
         <div class="kpis" id="kpis"></div>

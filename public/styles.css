@@ -869,6 +869,58 @@ tr.warning td {
   background: #fbfcfc;
 }
 
+.install-backdrop[hidden] {
+  display: none;
+}
+
+.install-panel {
+  box-shadow: 0 24px 60px rgba(23, 32, 38, 0.22);
+  max-height: min(760px, calc(100vh - 36px));
+  max-width: 860px;
+  overflow: auto;
+  width: min(860px, 100%);
+}
+
+.install-summary {
+  margin-bottom: 12px;
+}
+
+.install-native-actions {
+  margin-bottom: 14px;
+}
+
+.install-native-actions button {
+  min-width: 180px;
+}
+
+.install-instructions {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.install-instructions div {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.install-instructions h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.install-instructions ol {
+  color: var(--ink);
+  margin: 0;
+  padding-left: 20px;
+}
+
+.install-instructions li {
+  margin-bottom: 6px;
+}
+
 .bom-copy-panel {
   border-bottom: 1px solid var(--line);
   margin-bottom: 12px;
@@ -984,7 +1036,7 @@ pre {
 
   .filters {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
   .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .formula-product-form, .production-week-add-form {
@@ -1047,6 +1099,10 @@ pre {
     display: grid;
   }
 
+  .install-instructions {
+    grid-template-columns: 1fr;
+  }
+
   .rl-calendar-panel {
     padding: 10px;
   }
@@ -1100,6 +1156,18 @@ pre {
   }
 
   .production-week-focus {
+    max-height: calc(100vh - 20px);
+  }
+
+  .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .filters button {
+    width: 100%;
+  }
+
+  .install-panel {
     max-height: calc(100vh - 20px);
   }
 
