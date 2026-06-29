@@ -941,7 +941,7 @@ tr.warning td {
 
 .bom-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -967,15 +967,18 @@ tr.warning td {
 }
 
 .batch-list-item {
+  align-content: start;
   border: 1px solid var(--line);
   background: white;
   color: var(--ink);
   border-radius: 8px;
-  padding: 10px;
+  min-height: 54px;
+  padding: 9px 10px;
   display: grid;
-  gap: 4px;
+  gap: 3px;
   justify-items: start;
   text-align: left;
+  width: 100%;
 }
 
 .batch-list-item.active, .batch-list-item:hover {
@@ -987,6 +990,12 @@ tr.warning td {
 .batch-list-item span {
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.2;
+}
+
+.batch-list-item strong {
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .focus-panel {
