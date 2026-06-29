@@ -624,11 +624,50 @@ tr.warning td {
   margin-top: -8px;
 }
 
+.source-note.success {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.source-note.warning {
+  color: #8a5a00;
+  font-weight: 700;
+}
+
+.source-note.error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .production-tools .source-note,
 .forecast-tools .source-note,
 .velocity-tools .source-note {
   align-self: center;
   margin-top: 0;
+}
+
+.file-action {
+  align-self: end;
+  border: 1px solid #1f5d55;
+  background: #eef5f4;
+  color: #174d46;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 40px;
+  padding: 9px 12px;
+  text-align: center;
+}
+
+.file-action span {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.file-action input {
+  display: none;
 }
 
 .inventory-add-form {
@@ -644,9 +683,32 @@ tr.warning td {
 
 .forecast-tools {
   display: grid;
-  grid-template-columns: minmax(150px, 190px) minmax(220px, 1fr) minmax(150px, 190px) minmax(180px, auto) minmax(180px, 1fr);
+  grid-template-columns: minmax(140px, 170px) minmax(210px, 1fr) minmax(140px, 170px) repeat(3, minmax(150px, auto)) minmax(180px, 1fr);
   gap: 12px;
   align-items: end;
+}
+
+.unmatched-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 14px;
+  padding: 12px;
+}
+
+.unmatched-panel h3,
+.unmatched-panel p {
+  margin: 0;
+}
+
+.unmatched-panel p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.small-empty {
+  margin: 10px 0 14px;
 }
 
 .velocity-tools {
@@ -1048,6 +1110,7 @@ pre {
   .production-tools .button-link,
   .production-tools button,
   .forecast-tools button,
+  .forecast-tools .file-action,
   .velocity-tools button,
   .velocity-size-form button,
   .velocity-schedule-form button,

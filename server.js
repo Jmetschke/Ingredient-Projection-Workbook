@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 import dotenv from "dotenv";
 import express from "express";
 import XLSX from "xlsx";
@@ -129,6 +130,178 @@ function rowsFromVelocityPdf(buffer) {
   }).filter((row) => /^(OK|CRITICAL|BELOW PAR)$/i.test(row.status) && row.sku && Number.isFinite(row.velocity_per_day));
 }
 
+function inflatePdfStreams(buffer) {
+  const source = buffer.toString("latin1");
+  const streams = [];
+  const streamRe = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let match;
+  while ((match = streamRe.exec(source))) {
+    try {
+      streams.push(zlib.inflateSync(Buffer.from(match[1], "latin1")).toString("latin1"));
+    } catch {
+      // Non-Flate streams are not useful for this text extraction pass.
+    }
+  }
+  return streams;
+}
+
+function inflatePdfObject(buffer, objectId) {
+  const source = buffer.toString("latin1");
+  const start = source.indexOf(`${objectId} 0 obj`);
+  if (start < 0) return "";
+  const end = source.indexOf("endobj", start);
+  const body = source.slice(start, end < 0 ? undefined : end);
+  const stream = body.match(/stream\r?\n([\s\S]*?)\r?\nendstream/);
+  if (!stream) return "";
+  try {
+    return zlib.inflateSync(Buffer.from(stream[1], "latin1")).toString("latin1");
+  } catch {
+    return "";
+  }
+}
+
+function pdfCMap(buffer, objectId) {
+  const text = inflatePdfObject(buffer, objectId);
+  const map = new Map();
+  let block;
+  const charBlocks = /beginbfchar([\s\S]*?)endbfchar/g;
+  while ((block = charBlocks.exec(text))) {
+    const rowRe = /<([0-9A-F]+)>\s*<([0-9A-F]+)>/g;
+    let row;
+    while ((row = rowRe.exec(block[1]))) {
+      map.set(row[1].toUpperCase(), String.fromCodePoint(parseInt(row[2].slice(-4), 16)));
+    }
+  }
+  const rangeBlocks = /beginbfrange([\s\S]*?)endbfrange/g;
+  while ((block = rangeBlocks.exec(text))) {
+    const rowRe = /<([0-9A-F]+)>\s*<([0-9A-F]+)>\s*<([0-9A-F]+)>/g;
+    let row;
+    while ((row = rowRe.exec(block[1]))) {
+      const first = parseInt(row[1], 16);
+      const last = parseInt(row[2], 16);
+      const unicodeStart = parseInt(row[3], 16);
+      const length = row[1].length;
+      for (let value = first; value <= last && value - first < 1000; value += 1) {
+        map.set(
+          value.toString(16).toUpperCase().padStart(length, "0"),
+          String.fromCodePoint(unicodeStart + value - first),
+        );
+      }
+    }
+  }
+  return map;
+}
+
+function distruFontMaps(buffer) {
+  // Distru valuation PDFs rendered by Chromium/Skia keep the visible table in F4-F9
+  // and place the ToUnicode maps in these companion objects.
+  const candidateMaps = { F4: 1705, F5: 1722, F6: 1741, F7: 1753, F8: 1793, F9: 1862 };
+  return new Map(
+    Object.entries(candidateMaps)
+      .map(([font, objectId]) => [font, pdfCMap(buffer, objectId)])
+      .filter(([, map]) => map.size),
+  );
+}
+
+function decodePdfHexText(hex, font, fontMaps) {
+  const map = fontMaps.get(font);
+  if (!map) return "";
+  const lengths = [...new Set([...map.keys()].map((key) => key.length))].sort((a, b) => b - a);
+  let output = "";
+  for (let index = 0; index < hex.length;) {
+    let matched = false;
+    for (const length of lengths) {
+      const code = hex.slice(index, index + length).toUpperCase();
+      if (map.has(code)) {
+        output += map.get(code);
+        index += length;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) index += 2;
+  }
+  return output;
+}
+
+function extractDistruInventoryTextItems(buffer) {
+  const fontMaps = distruFontMaps(buffer);
+  const items = [];
+  let page = 0;
+  for (const stream of inflatePdfStreams(buffer)) {
+    if (!stream.includes("BT")) continue;
+    page += 1;
+    let font = "";
+    let x = 0;
+    let y = 0;
+    const tokenRe = /(BT|ET)|\/(F\d+)\s+[\d.]+\s+Tf|1\s+0\s+0\s+-1\s+([\d.\-]+)\s+([\d.\-]+)\s+Tm|([\d.\-]+)\s+([\d.\-]+)\s+Td|<([0-9A-F]+)>\s+Tj/g;
+    let token;
+    while ((token = tokenRe.exec(stream))) {
+      if (token[2]) font = token[2];
+      else if (token[3]) {
+        x = Number(token[3]);
+        y = Number(token[4]);
+      } else if (token[5]) {
+        x += Number(token[5]);
+        y += Number(token[6]);
+      } else if (token[7]) {
+        const text = decodePdfHexText(token[7], font, fontMaps);
+        if (text) items.push({ page, x, y, text });
+      }
+    }
+  }
+  return items;
+}
+
+function cleanPdfCell(value) {
+  return String(value || "").replace(/[\b\f]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function pdfColumnNumber(items, minX, maxX = Infinity) {
+  const raw = items
+    .filter((item) => item.x >= minX && item.x < maxX)
+    .sort((a, b) => a.x - b.x)
+    .map((item) => item.text)
+    .join("")
+    .replace(/[^\d.\-]/g, "");
+  const number = Number(raw);
+  return Number.isFinite(number) ? number : null;
+}
+
+function guessInventoryUom(name) {
+  return normalizeIngredientUom("", name);
+}
+
+function rowsFromDistruInventoryPdf(buffer) {
+  const grouped = new Map();
+  for (const item of extractDistruInventoryTextItems(buffer)) {
+    const key = `${item.page}:${Math.round(item.y)}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  }
+  return [...grouped.values()].map((items) => {
+    const sorted = items.sort((a, b) => a.x - b.x);
+    const uploadedName = cleanPdfCell(sorted.filter((item) => item.x < 220).map((item) => item.text).join(""));
+    // The valuation report has Available around x=484 and On Hand around x=650.
+    // Current Inventory uses On Hand when present and falls back to Available.
+    const onHand = pdfColumnNumber(sorted, 640, 700);
+    const available = pdfColumnNumber(sorted, 475, 535);
+    const currentQty = onHand ?? available;
+    return {
+      uploaded_name: uploadedName,
+      current_qty: currentQty,
+      quantity_uom: guessInventoryUom(uploadedName),
+    };
+  }).filter((row) => {
+    const normalizedName = normalizeMatchText(row.uploaded_name);
+    return row.uploaded_name
+      && Number.isFinite(row.current_qty)
+      && !["name", "total"].includes(normalizedName)
+      && !(normalizedName.split(" ").length <= 1 && Number(row.current_qty || 0) === 0)
+      && normalizedName.length > 2;
+  });
+}
+
 function scoreProductMatch(uploadName, productName) {
   const upload = normalizeMatchText(uploadName);
   const product = normalizeMatchText(productName);
@@ -140,6 +313,38 @@ function scoreProductMatch(uploadName, productName) {
   const intersection = [...uploadTokens].filter((token) => productTokens.has(token)).length;
   const union = new Set([...uploadTokens, ...productTokens]).size || 1;
   return intersection / union;
+}
+
+function scoreIngredientMatch(uploadName, ingredientName) {
+  const upload = normalizeMatchText(uploadName);
+  const ingredient = normalizeMatchText(ingredientName);
+  if (!upload || !ingredient) return 0;
+  if (upload === ingredient) return 1;
+  if (upload.split(" ").length <= 1) return 0;
+  if (ingredient.includes(upload) || upload.includes(ingredient)) return 0.94;
+  const uploadTokens = new Set(upload.split(" ").filter(Boolean));
+  const ingredientTokens = new Set(ingredient.split(" ").filter(Boolean));
+  const intersection = [...uploadTokens].filter((token) => ingredientTokens.has(token)).length;
+  const union = new Set([...uploadTokens, ...ingredientTokens]).size || 1;
+  return intersection / union;
+}
+
+function matchInventoryRows(rows, ingredients) {
+  return rows.map((row) => {
+    const scored = ingredients
+      .map((ingredient) => ({ ingredient, score: scoreIngredientMatch(row.uploaded_name, ingredient.name) }))
+      .sort((a, b) => b.score - a.score)[0];
+    const match = scored?.score >= 0.5 ? scored : null;
+    return {
+      ...row,
+      ingredient_id: match?.ingredient.id || null,
+      ingredient_name: match?.ingredient.name || "",
+      ingredient_type: normalizeIngredientType(match?.ingredient.ingredient_type),
+      match_score: Number((match?.score || 0).toFixed(3)),
+      match_method: match ? (match.score === 1 ? "exact" : "fuzzy") : "unmatched",
+      quantity_uom: match?.ingredient.purchase_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
+    };
+  });
 }
 
 function matchVelocityRows(rows, products) {
@@ -180,6 +385,65 @@ async function latestVelocityRows() {
     FROM latest_velocity_rows
     ORDER BY id
   `);
+}
+
+async function latestInventoryRows() {
+  return all(`
+    SELECT id,
+           uploaded_name,
+           current_qty,
+           quantity_uom,
+           ingredient_id,
+           ingredient_name,
+           ingredient_type,
+           match_score,
+           match_method,
+           uploaded_at
+    FROM latest_inventory_rows
+    ORDER BY uploaded_name
+  `);
+}
+
+async function activeMasterIngredients() {
+  const rows = await all(`
+    SELECT id, name, purchase_uom, ingredient_type
+    FROM ingredients
+    WHERE is_master = 1 AND active = 1
+    ORDER BY name
+  `);
+  return rows.map(withBomUom);
+}
+
+async function replaceLatestInventoryRows(rows) {
+  await run("DELETE FROM latest_inventory_rows");
+  for (const row of rows) {
+    await run(
+      `INSERT INTO latest_inventory_rows
+        (uploaded_name, current_qty, quantity_uom, ingredient_id, ingredient_name, ingredient_type, match_score, match_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.uploaded_name,
+        row.current_qty ?? 0,
+        row.quantity_uom || guessInventoryUom(row.uploaded_name),
+        row.ingredient_id || null,
+        row.ingredient_name || "",
+        normalizeIngredientType(row.ingredient_type),
+        row.match_score ?? null,
+        row.match_method || "unmatched",
+      ],
+    );
+  }
+}
+
+async function rematchLatestInventoryRows() {
+  const rawRows = (await latestInventoryRows()).map((row) => ({
+    uploaded_name: row.uploaded_name,
+    current_qty: row.current_qty,
+    quantity_uom: row.quantity_uom || guessInventoryUom(row.uploaded_name),
+  }));
+  const matched = matchInventoryRows(rawRows, await activeMasterIngredients());
+  await replaceLatestInventoryRows(matched);
+  return latestInventoryRows();
 }
 
 function withVelocityBatchYield(product) {
@@ -496,6 +760,23 @@ async function scheduledIngredientUsageForecast(query = {}) {
     HAVING required_qty > 0
     ORDER BY i.name, quantity_uom
   `, { start, end });
+  const inventoryRows = await latestInventoryRows();
+  const inventoryByIngredient = new Map();
+  for (const row of inventoryRows) {
+    if (!row.ingredient_id) continue;
+    const existing = inventoryByIngredient.get(String(row.ingredient_id));
+    if (existing) existing.current_qty += Number(row.current_qty || 0);
+    else inventoryByIngredient.set(String(row.ingredient_id), { ...row, current_qty: Number(row.current_qty || 0) });
+  }
+  const rowsWithInventory = rows.map((row) => {
+    const inventory = inventoryByIngredient.get(String(row.ingredient_id));
+    return {
+      ...row,
+      current_inventory: inventory ? inventory.current_qty : null,
+      inventory_uom: inventory?.quantity_uom || row.quantity_uom,
+      inventory_uploaded_name: inventory?.uploaded_name || "",
+    };
+  });
   const detail = await all(`
     SELECT w.week_start,
            pb.batch_type,
@@ -518,8 +799,10 @@ async function scheduledIngredientUsageForecast(query = {}) {
   `, { start, end });
   return {
     filters: { months: monthCount, start, end },
-    rows,
+    rows: rowsWithInventory,
     detail,
+    inventoryRows,
+    unmatchedInventoryRows: inventoryRows.filter((row) => !row.ingredient_id),
   };
 }
 
@@ -915,6 +1198,57 @@ app.delete("/api/production-batches/:id", async (req, res) => {
 app.get("/api/forecast", async (req, res) => {
   try {
     ok(res, await scheduledIngredientUsageForecast(req.query));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.get("/api/inventory-upload", async (req, res) => {
+  try {
+    ok(res, {
+      rows: await latestInventoryRows(),
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/inventory-upload", express.raw({ type: ["application/pdf", "application/octet-stream"], limit: "20mb" }), async (req, res) => {
+  try {
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+    if (!buffer.length) return fail(res, new Error("Upload a PDF inventory valuation report."), 400);
+    const parsedRows = rowsFromDistruInventoryPdf(buffer);
+    if (!parsedRows.length) return fail(res, new Error("No inventory rows were found in that PDF."), 400);
+    const matchedRows = matchInventoryRows(parsedRows, await activeMasterIngredients());
+    await replaceLatestInventoryRows(matchedRows);
+    const savedRows = await latestInventoryRows();
+    ok(res, {
+      rows: savedRows,
+      matched: savedRows.filter((row) => row.ingredient_id).length,
+      unmatched: savedRows.filter((row) => !row.ingredient_id).length,
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/inventory-upload/rematch", async (req, res) => {
+  try {
+    const rows = await rematchLatestInventoryRows();
+    ok(res, {
+      rows,
+      matched: rows.filter((row) => row.ingredient_id).length,
+      unmatched: rows.filter((row) => !row.ingredient_id).length,
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.delete("/api/inventory-upload", async (req, res) => {
+  try {
+    await run("DELETE FROM latest_inventory_rows");
+    ok(res, { rows: [] });
   } catch (error) {
     fail(res, error);
   }

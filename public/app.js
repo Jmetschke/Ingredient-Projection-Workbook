@@ -12,6 +12,8 @@ const state = {
   forecastFilter: "",
   forecastIngredientType: "",
   forecastRows: [],
+  forecastInventoryRows: [],
+  forecastUnmatchedInventoryRows: [],
   velocityWeeks: 4,
   velocityRows: [],
   velocityInstructions: [],
@@ -839,6 +841,7 @@ async function renderForecast() {
   const monthsSelect = document.querySelector("#forecast-months");
   const filterInput = document.querySelector("#forecast-filter");
   const typeSelect = document.querySelector("#forecast-ingredient-type");
+  const uploadInput = document.querySelector("#forecast-inventory-upload");
   monthsSelect.value = String(state.forecastMonths);
   monthsSelect.onchange = async () => {
     state.forecastMonths = Number(monthsSelect.value) || 6;
@@ -857,15 +860,29 @@ async function renderForecast() {
   document.querySelector("#forecast-print-report").onclick = () => {
     printForecastReport(forecastFilteredRows(state.forecastRows));
   };
+  uploadInput.onchange = () => uploadForecastInventoryPdf(uploadInput);
+  document.querySelector("#forecast-inventory-clear").onclick = async () => {
+    try {
+      setMessage("#forecast-inventory-message", "Clearing current inventory upload...");
+      await api("/api/inventory-upload", { method: "DELETE" });
+      await renderForecast();
+      setMessage("#forecast-inventory-message", "Current inventory upload cleared.", "success");
+    } catch (error) {
+      setMessage("#forecast-inventory-message", error.message, "error");
+    }
+  };
   const data = await api(`/api/forecast?months=${state.forecastMonths}`);
   const forecastWindow = document.querySelector("#forecast-window");
   forecastWindow.textContent = `${data.filters.start} through ${data.filters.end}`;
   forecastWindow.className = "source-note";
   state.forecastRows = data.rows || [];
+  state.forecastInventoryRows = data.inventoryRows || [];
+  state.forecastUnmatchedInventoryRows = data.unmatchedInventoryRows || [];
   document.querySelector("#forecast-ingredient-options").innerHTML = [...new Set(state.forecastRows.map((row) => row.ingredient_name).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b))
     .map((name) => `<option value="${escapeHtml(name)}"></option>`)
     .join("");
+  renderForecastUnmatchedInventory();
   renderForecastTable(state.forecastRows);
 }
 
@@ -888,12 +905,94 @@ function renderForecastTable(rows) {
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Type", key: "ingredient_type" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
+    { label: "Current Inventory", numeric: true, value: (r) => r.current_inventory == null ? "" : qty(r.current_inventory) },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
     { label: "First Week", key: "first_week" },
     { label: "Last Week", key: "last_week" },
   ], filtered);
+}
+
+function renderForecastUnmatchedInventory() {
+  const host = document.querySelector("#forecast-unmatched-inventory");
+  const rows = state.forecastUnmatchedInventoryRows || [];
+  const uploadedCount = state.forecastInventoryRows.length;
+  if (!uploadedCount) {
+    host.innerHTML = `<div class="empty small-empty">No inventory valuation PDF has been uploaded yet.</div>`;
+    return;
+  }
+  if (!rows.length) {
+    host.innerHTML = `<div class="source-note success">Current inventory loaded. All ${uploadedCount} uploaded rows matched the master ingredient list.</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="unmatched-panel">
+      <div>
+        <h3>Unmatched Inventory Items</h3>
+        <p>${rows.length} uploaded item${rows.length === 1 ? "" : "s"} did not match the master ingredient list.</p>
+      </div>
+      ${table([
+        { label: "Uploaded Item", key: "uploaded_name" },
+        { label: "Current Inventory", numeric: true, value: (row) => qty(row.current_qty) },
+        { label: "UOM", key: "quantity_uom" },
+        { label: "Action", value: (row) => `<button class="forecast-add-ingredient" type="button" data-uploaded-name="${escapeHtml(row.uploaded_name)}" data-uom="${escapeHtml(row.quantity_uom || suggestedIngredientUom(row.uploaded_name))}">Add To Inventory</button>` },
+      ], rows)}
+    </div>
+  `;
+  host.querySelectorAll(".forecast-add-ingredient").forEach((button) => {
+    button.onclick = () => addForecastIngredientFromUpload(button);
+  });
+}
+
+function suggestedIngredientUom(name) {
+  return /\b(bottle|cap|pouch|container|vape|tube|paper|glove|net|band)\b/i.test(name) ? "each" : "grams";
+}
+
+async function uploadForecastInventoryPdf(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    setMessage("#forecast-inventory-message", "Reading inventory valuation PDF...");
+    const res = await fetch("/api/inventory-upload", {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/pdf" },
+      body: file,
+    });
+    const payload = await res.json();
+    if (!payload.ok) throw new Error(payload.error);
+    await renderForecast();
+    setMessage(
+      "#forecast-inventory-message",
+      `Loaded ${payload.data.rows.length} inventory rows. ${payload.data.matched} matched, ${payload.data.unmatched} unmatched.`,
+      payload.data.unmatched ? "warning" : "success",
+    );
+  } catch (error) {
+    setMessage("#forecast-inventory-message", error.message, "error");
+  } finally {
+    input.value = "";
+  }
+}
+
+async function addForecastIngredientFromUpload(button) {
+  const name = button.dataset.uploadedName || "";
+  const purchase_uom = button.dataset.uom || suggestedIngredientUom(name);
+  try {
+    button.disabled = true;
+    button.textContent = "Adding...";
+    await api("/api/ingredients", {
+      method: "POST",
+      body: JSON.stringify({ name, purchase_uom, ingredient_type: "SB/Hijnx" }),
+    });
+    await api("/api/inventory-upload/rematch", { method: "POST" });
+    await loadReference();
+    await renderForecast();
+    setMessage("#forecast-inventory-message", `${name} added to the master ingredient list.`, "success");
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Add To Inventory";
+    setMessage("#forecast-inventory-message", error.message, "error");
+  }
 }
 
 function printForecastReport(rows) {
@@ -918,6 +1017,7 @@ function printForecastReport(rows) {
       <td>${escapeHtml(row.ingredient_name)}</td>
       <td>${escapeHtml(row.ingredient_type)}</td>
       <td class="numeric">${qty(row.required_qty)}</td>
+      <td class="numeric">${row.current_inventory == null ? "" : qty(row.current_inventory)}</td>
       <td>${escapeHtml(row.quantity_uom)}</td>
       <td class="numeric">${escapeHtml(row.scheduled_batches)}</td>
       <td>${escapeHtml(row.products || "")}</td>
@@ -969,7 +1069,7 @@ function printForecastReport(rows) {
         ${rows.length ? `
           <table>
             <thead>
-              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>
