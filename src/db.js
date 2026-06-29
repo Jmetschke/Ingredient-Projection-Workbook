@@ -64,6 +64,16 @@ export async function initDb() {
   if (!velocityColumns.some((column) => column.name === "projected_units")) {
     await execute("ALTER TABLE latest_velocity_rows ADD COLUMN projected_units REAL");
   }
+  const inventoryColumns = await all("PRAGMA table_info(latest_inventory_rows)");
+  if (!inventoryColumns.some((column) => column.name === "inventory_uom")) {
+    await execute("ALTER TABLE latest_inventory_rows ADD COLUMN inventory_uom TEXT");
+  }
+  if (!inventoryColumns.some((column) => column.name === "grams_per_inventory_unit")) {
+    await execute("ALTER TABLE latest_inventory_rows ADD COLUMN grams_per_inventory_unit REAL");
+  }
+  if (!inventoryColumns.some((column) => column.name === "current_qty_grams")) {
+    await execute("ALTER TABLE latest_inventory_rows ADD COLUMN current_qty_grams REAL");
+  }
 }
 
 export async function one(sql, params = {}) {

@@ -905,7 +905,7 @@ function renderForecastTable(rows) {
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Type", key: "ingredient_type" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
-    { label: "Current Inventory", numeric: true, value: (r) => r.current_inventory == null ? "" : qty(r.current_inventory) },
+    { label: "Current Inventory (g)", numeric: true, value: (r) => r.current_inventory_grams == null ? "" : qty(r.current_inventory_grams) },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
@@ -934,8 +934,9 @@ function renderForecastUnmatchedInventory() {
       </div>
       ${table([
         { label: "Uploaded Item", key: "uploaded_name" },
-        { label: "Current Inventory", numeric: true, value: (row) => qty(row.current_qty) },
-        { label: "UOM", key: "quantity_uom" },
+        { label: "Uploaded Qty", numeric: true, value: (row) => qty(row.current_qty) },
+        { label: "Inventory UOM", key: "inventory_uom" },
+        { label: "Gram Conversion", numeric: true, value: (row) => row.grams_per_inventory_unit == null ? "" : qty(row.grams_per_inventory_unit) },
         { label: "Action", value: (row) => `<button class="forecast-add-ingredient" type="button" data-uploaded-name="${escapeHtml(row.uploaded_name)}" data-uom="${escapeHtml(row.quantity_uom || suggestedIngredientUom(row.uploaded_name))}">Add To Inventory</button>` },
       ], rows)}
     </div>
@@ -1017,7 +1018,7 @@ function printForecastReport(rows) {
       <td>${escapeHtml(row.ingredient_name)}</td>
       <td>${escapeHtml(row.ingredient_type)}</td>
       <td class="numeric">${qty(row.required_qty)}</td>
-      <td class="numeric">${row.current_inventory == null ? "" : qty(row.current_inventory)}</td>
+      <td class="numeric">${row.current_inventory_grams == null ? "" : qty(row.current_inventory_grams)}</td>
       <td>${escapeHtml(row.quantity_uom)}</td>
       <td class="numeric">${escapeHtml(row.scheduled_batches)}</td>
       <td>${escapeHtml(row.products || "")}</td>
@@ -1069,7 +1070,7 @@ function printForecastReport(rows) {
         ${rows.length ? `
           <table>
             <thead>
-              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory (g)</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>

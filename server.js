@@ -8,6 +8,7 @@ import { all, one, run } from "./src/db.js";
 import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
 import { BATCH_TYPES, PRODUCT_ALIASES, VELOCITY_BATCH_UNIT_MULTIPLIERS } from "./src/master-products.js";
 import { bomUomForIngredient } from "./src/master-ingredients.js";
+import { INGREDIENT_UNIT_CONVERSION_BY_NAME } from "./src/ingredient-unit-conversions.js";
 
 dotenv.config();
 
@@ -272,6 +273,22 @@ function guessInventoryUom(name) {
   return normalizeIngredientUom("", name);
 }
 
+function inventoryConversionForName(name) {
+  return INGREDIENT_UNIT_CONVERSION_BY_NAME.get(String(name || "").trim().toLowerCase()) || null;
+}
+
+function withInventoryConversion(row, matchedName = "") {
+  const conversion = inventoryConversionForName(matchedName) || inventoryConversionForName(row.uploaded_name);
+  const gramsPerInventoryUnit = Number(conversion?.grams_per_inventory_unit);
+  const hasGramConversion = Number.isFinite(gramsPerInventoryUnit) && gramsPerInventoryUnit > 0;
+  return {
+    ...row,
+    inventory_uom: conversion?.inventory_uom || row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
+    grams_per_inventory_unit: hasGramConversion ? gramsPerInventoryUnit : null,
+    current_qty_grams: hasGramConversion ? Number(row.current_qty || 0) * gramsPerInventoryUnit : null,
+  };
+}
+
 function rowsFromDistruInventoryPdf(buffer) {
   const grouped = new Map();
   for (const item of extractDistruInventoryTextItems(buffer)) {
@@ -335,7 +352,7 @@ function matchInventoryRows(rows, ingredients) {
       .map((ingredient) => ({ ingredient, score: scoreIngredientMatch(row.uploaded_name, ingredient.name) }))
       .sort((a, b) => b.score - a.score)[0];
     const match = scored?.score >= 0.5 ? scored : null;
-    return {
+    const matchedRow = {
       ...row,
       ingredient_id: match?.ingredient.id || null,
       ingredient_name: match?.ingredient.name || "",
@@ -344,6 +361,7 @@ function matchInventoryRows(rows, ingredients) {
       match_method: match ? (match.score === 1 ? "exact" : "fuzzy") : "unmatched",
       quantity_uom: match?.ingredient.purchase_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
     };
+    return withInventoryConversion(matchedRow, match?.ingredient.name);
   });
 }
 
@@ -388,11 +406,14 @@ async function latestVelocityRows() {
 }
 
 async function latestInventoryRows() {
-  return all(`
+  const rows = await all(`
     SELECT id,
            uploaded_name,
            current_qty,
            quantity_uom,
+           inventory_uom,
+           grams_per_inventory_unit,
+           current_qty_grams,
            ingredient_id,
            ingredient_name,
            ingredient_type,
@@ -402,6 +423,11 @@ async function latestInventoryRows() {
     FROM latest_inventory_rows
     ORDER BY uploaded_name
   `);
+  return rows.map((row) => (
+    row.current_qty_grams == null && row.ingredient_name
+      ? withInventoryConversion(row, row.ingredient_name)
+      : row
+  ));
 }
 
 async function activeMasterIngredients() {
@@ -419,12 +445,16 @@ async function replaceLatestInventoryRows(rows) {
   for (const row of rows) {
     await run(
       `INSERT INTO latest_inventory_rows
-        (uploaded_name, current_qty, quantity_uom, ingredient_id, ingredient_name, ingredient_type, match_score, match_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (uploaded_name, current_qty, quantity_uom, inventory_uom, grams_per_inventory_unit, current_qty_grams,
+         ingredient_id, ingredient_name, ingredient_type, match_score, match_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.uploaded_name,
         row.current_qty ?? 0,
         row.quantity_uom || guessInventoryUom(row.uploaded_name),
+        row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
+        row.grams_per_inventory_unit ?? null,
+        row.current_qty_grams ?? null,
         row.ingredient_id || null,
         row.ingredient_name || "",
         normalizeIngredientType(row.ingredient_type),
@@ -440,6 +470,7 @@ async function rematchLatestInventoryRows() {
     uploaded_name: row.uploaded_name,
     current_qty: row.current_qty,
     quantity_uom: row.quantity_uom || guessInventoryUom(row.uploaded_name),
+    inventory_uom: row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
   }));
   const matched = matchInventoryRows(rawRows, await activeMasterIngredients());
   await replaceLatestInventoryRows(matched);
@@ -765,15 +796,29 @@ async function scheduledIngredientUsageForecast(query = {}) {
   for (const row of inventoryRows) {
     if (!row.ingredient_id) continue;
     const existing = inventoryByIngredient.get(String(row.ingredient_id));
-    if (existing) existing.current_qty += Number(row.current_qty || 0);
-    else inventoryByIngredient.set(String(row.ingredient_id), { ...row, current_qty: Number(row.current_qty || 0) });
+    const gramQty = row.current_qty_grams == null ? null : Number(row.current_qty_grams || 0);
+    if (existing) {
+      existing.current_qty += Number(row.current_qty || 0);
+      existing.current_qty_grams = existing.current_qty_grams == null || gramQty == null
+        ? null
+        : existing.current_qty_grams + gramQty;
+    } else {
+      inventoryByIngredient.set(String(row.ingredient_id), {
+        ...row,
+        current_qty: Number(row.current_qty || 0),
+        current_qty_grams: gramQty,
+      });
+    }
   }
   const rowsWithInventory = rows.map((row) => {
     const inventory = inventoryByIngredient.get(String(row.ingredient_id));
     return {
       ...row,
       current_inventory: inventory ? inventory.current_qty : null,
+      current_inventory_grams: inventory ? inventory.current_qty_grams : null,
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
+      inventory_source_uom: inventory?.inventory_uom || "",
+      grams_per_inventory_unit: inventory?.grams_per_inventory_unit ?? null,
       inventory_uploaded_name: inventory?.uploaded_name || "",
     };
   });
