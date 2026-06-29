@@ -1844,6 +1844,15 @@ document.querySelector("#formula-copy-form").addEventListener("submit", async (e
   }
 });
 
+// PWA: register the online-first service worker without blocking the live app startup.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch((error) => {
+      console.warn("Service worker registration failed", error);
+    });
+  });
+}
+
 loadReference().then(() => activate("dashboard")).catch((error) => {
   document.body.insertAdjacentHTML("beforeend", `<pre>${escapeHtml(error.message)}</pre>`);
 });

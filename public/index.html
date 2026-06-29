@@ -3,7 +3,16 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- PWA: theme/app metadata for install prompts and standalone mobile display. -->
+    <meta name="theme-color" content="#216b62">
+    <meta name="application-name" content="Production Planning">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Production">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>Production Planning</title>
+    <!-- PWA: manifest and icons are served from the Express static public folder. -->
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
