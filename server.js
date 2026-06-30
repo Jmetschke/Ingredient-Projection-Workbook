@@ -827,10 +827,13 @@ async function scheduledIngredientUsageForecast(query = {}) {
     const currentInventoryValue = rowUom === "each"
       ? inventory?.current_qty ?? null
       : inventory?.current_qty_grams ?? null;
+    const currentInventoryGrams = rowUom === "each"
+      ? inventory?.current_qty ?? null
+      : inventory?.current_qty_grams ?? null;
     return {
       ...row,
       current_inventory: inventory ? inventory.current_qty : null,
-      current_inventory_grams: inventory ? inventory.current_qty_grams : null,
+      current_inventory_grams: currentInventoryGrams,
       current_inventory_value: currentInventoryValue,
       current_inventory_uom: rowUom === "each" ? "each" : "grams",
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
