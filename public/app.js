@@ -57,6 +57,20 @@ function qty(value) {
   return Math.abs(n) >= 100 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
+function forecastInventoryValue(row) {
+  const uom = String(row.quantity_uom || "").toLowerCase();
+  if (uom === "each") return row.current_inventory == null ? null : Number(row.current_inventory);
+  if (uom === "grams" || uom === "gram") return row.current_inventory_grams == null ? null : Number(row.current_inventory_grams);
+  return row.current_inventory_grams == null
+    ? row.current_inventory == null ? null : Number(row.current_inventory)
+    : Number(row.current_inventory_grams);
+}
+
+function forecastInventoryDisplay(row) {
+  const value = forecastInventoryValue(row);
+  return value == null ? "" : qty(value);
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -181,6 +195,7 @@ async function renderDashboard() {
   document.querySelector("#dashboard-ingredient-usage").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
+    { label: "Current Inventory", numeric: true, value: (r) => forecastInventoryDisplay(r) },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
@@ -905,7 +920,7 @@ function renderForecastTable(rows) {
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Type", key: "ingredient_type" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
-    { label: "Current Inventory (g)", numeric: true, value: (r) => r.current_inventory_grams == null ? "" : qty(r.current_inventory_grams) },
+    { label: "Current Inventory", numeric: true, value: (r) => forecastInventoryDisplay(r) },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
@@ -1018,7 +1033,7 @@ function printForecastReport(rows) {
       <td>${escapeHtml(row.ingredient_name)}</td>
       <td>${escapeHtml(row.ingredient_type)}</td>
       <td class="numeric">${qty(row.required_qty)}</td>
-      <td class="numeric">${row.current_inventory_grams == null ? "" : qty(row.current_inventory_grams)}</td>
+      <td class="numeric">${forecastInventoryDisplay(row)}</td>
       <td>${escapeHtml(row.quantity_uom)}</td>
       <td class="numeric">${escapeHtml(row.scheduled_batches)}</td>
       <td>${escapeHtml(row.products || "")}</td>
@@ -1070,7 +1085,7 @@ function printForecastReport(rows) {
         ${rows.length ? `
           <table>
             <thead>
-              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory (g)</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>
