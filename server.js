@@ -820,28 +820,54 @@ async function scheduledIngredientUsageForecast(query = {}) {
     addInventoryAggregate(inventoryByIngredient, row.ingredient_id ? String(row.ingredient_id) : "", row);
     addInventoryAggregate(inventoryByName, normalizeMatchText(row.ingredient_name || row.uploaded_name), row);
   }
-  const rowsWithInventory = rows.map((row) => {
-    const inventory = inventoryByIngredient.get(String(row.ingredient_id))
-      || inventoryByName.get(normalizeMatchText(row.ingredient_name));
-    const rowUom = String(row.quantity_uom || "").toLowerCase();
-    const currentInventoryValue = rowUom === "each"
+  function rowWithInventory(row, inventory) {
+    const rowUom = String(row.quantity_uom || inventory?.quantity_uom || "").toLowerCase();
+    const isEach = rowUom === "each";
+    const currentInventoryValue = isEach
       ? inventory?.current_qty ?? null
-      : inventory?.current_qty_grams ?? null;
-    const currentInventoryGrams = rowUom === "each"
+      : inventory?.current_qty_grams ?? inventory?.current_qty ?? null;
+    const currentInventoryGrams = isEach
       ? inventory?.current_qty ?? null
-      : inventory?.current_qty_grams ?? null;
+      : inventory?.current_qty_grams ?? inventory?.current_qty ?? null;
     return {
       ...row,
+      quantity_uom: row.quantity_uom || inventory?.quantity_uom || "grams",
       current_inventory: inventory ? inventory.current_qty : null,
       current_inventory_grams: currentInventoryGrams,
       current_inventory_value: currentInventoryValue,
-      current_inventory_uom: rowUom === "each" ? "each" : "grams",
+      current_inventory_uom: isEach ? "each" : "grams",
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
       inventory_source_uom: inventory?.inventory_uom || "",
       grams_per_inventory_unit: inventory?.grams_per_inventory_unit ?? null,
       inventory_uploaded_name: inventory?.uploaded_name || "",
     };
+  }
+  const rowKeys = new Set();
+  const rowsWithInventory = rows.map((row) => {
+    const inventory = inventoryByIngredient.get(String(row.ingredient_id))
+      || inventoryByName.get(normalizeMatchText(row.ingredient_name));
+    rowKeys.add(`${row.ingredient_id}:${String(row.quantity_uom || "").toLowerCase()}`);
+    return rowWithInventory(row, inventory);
   });
+  for (const inventory of inventoryByIngredient.values()) {
+    if (!inventory.ingredient_id) continue;
+    const inventoryUom = String(inventory.quantity_uom || "").toLowerCase();
+    const key = `${inventory.ingredient_id}:${inventoryUom}`;
+    if (rowKeys.has(key)) continue;
+    rowKeys.add(key);
+    rowsWithInventory.push(rowWithInventory({
+      ingredient_id: inventory.ingredient_id,
+      ingredient_name: inventory.ingredient_name || inventory.uploaded_name,
+      ingredient_type: normalizeIngredientType(inventory.ingredient_type),
+      quantity_uom: inventory.quantity_uom || "grams",
+      required_qty: 0,
+      scheduled_batches: 0,
+      product_count: 0,
+      products: "",
+      first_week: "",
+      last_week: "",
+    }, inventory));
+  }
   const detail = await all(`
     SELECT w.week_start,
            pb.batch_type,

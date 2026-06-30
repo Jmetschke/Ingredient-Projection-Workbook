@@ -147,6 +147,7 @@ export const EACH_UOM_INGREDIENTS = new Set([
   "Squeeze Pouch - Frosting",
   "Pouch - Party Frosting",
   "Dots - Container",
+  "Pouch - Dots",
   "Pouch - Grape Chrush 1g",
   "Pouch - Magic Mango 1g",
   "Pouch - Lemon Yuzu 1g",
