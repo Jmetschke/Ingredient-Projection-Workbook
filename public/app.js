@@ -58,6 +58,7 @@ function qty(value) {
 }
 
 function forecastInventoryValue(row) {
+  if (row.current_inventory_value != null) return Number(row.current_inventory_value);
   const uom = String(row.quantity_uom || "").toLowerCase();
   if (uom === "each") return row.current_inventory == null ? null : Number(row.current_inventory);
   if (uom === "grams" || uom === "gram") return row.current_inventory_grams == null ? null : Number(row.current_inventory_grams);

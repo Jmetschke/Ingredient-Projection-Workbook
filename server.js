@@ -48,6 +48,11 @@ function normalizeIngredientType(value) {
 function normalizeMatchText(value) {
   return String(value || "")
     .toLowerCase()
+    .replace(/\bchrush\b/g, "crush")
+    .replace(/\bstarwberry\b/g, "strawberry")
+    .replace(/\bpomegrante\b/g, "pomegranate")
+    .replace(/\bpassionfruit\b/g, "passion fruit")
+    .replace(/\bdragonfruit\b/g, "dragon fruit")
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\b(oz|g|gram|grams|unit|units|pcs|piece|pieces|pack|packs)\b/g, " ")
@@ -793,9 +798,10 @@ async function scheduledIngredientUsageForecast(query = {}) {
   `, { start, end });
   const inventoryRows = await latestInventoryRows();
   const inventoryByIngredient = new Map();
-  for (const row of inventoryRows) {
-    if (!row.ingredient_id) continue;
-    const existing = inventoryByIngredient.get(String(row.ingredient_id));
+  const inventoryByName = new Map();
+  function addInventoryAggregate(map, key, row) {
+    if (!key) return;
+    const existing = map.get(key);
     const gramQty = row.current_qty_grams == null ? null : Number(row.current_qty_grams || 0);
     if (existing) {
       existing.current_qty += Number(row.current_qty || 0);
@@ -803,19 +809,30 @@ async function scheduledIngredientUsageForecast(query = {}) {
         ? null
         : existing.current_qty_grams + gramQty;
     } else {
-      inventoryByIngredient.set(String(row.ingredient_id), {
+      map.set(key, {
         ...row,
         current_qty: Number(row.current_qty || 0),
         current_qty_grams: gramQty,
       });
     }
   }
+  for (const row of inventoryRows) {
+    addInventoryAggregate(inventoryByIngredient, row.ingredient_id ? String(row.ingredient_id) : "", row);
+    addInventoryAggregate(inventoryByName, normalizeMatchText(row.ingredient_name || row.uploaded_name), row);
+  }
   const rowsWithInventory = rows.map((row) => {
-    const inventory = inventoryByIngredient.get(String(row.ingredient_id));
+    const inventory = inventoryByIngredient.get(String(row.ingredient_id))
+      || inventoryByName.get(normalizeMatchText(row.ingredient_name));
+    const rowUom = String(row.quantity_uom || "").toLowerCase();
+    const currentInventoryValue = rowUom === "each"
+      ? inventory?.current_qty ?? null
+      : inventory?.current_qty_grams ?? null;
     return {
       ...row,
       current_inventory: inventory ? inventory.current_qty : null,
       current_inventory_grams: inventory ? inventory.current_qty_grams : null,
+      current_inventory_value: currentInventoryValue,
+      current_inventory_uom: rowUom === "each" ? "each" : "grams",
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
       inventory_source_uom: inventory?.inventory_uom || "",
       grams_per_inventory_unit: inventory?.grams_per_inventory_unit ?? null,
