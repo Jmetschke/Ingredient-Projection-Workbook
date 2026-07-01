@@ -286,8 +286,17 @@ function withInventoryConversion(row, matchedName = "") {
   const conversion = inventoryConversionForName(matchedName) || inventoryConversionForName(row.uploaded_name);
   const gramsPerInventoryUnit = Number(conversion?.grams_per_inventory_unit);
   const hasGramConversion = Number.isFinite(gramsPerInventoryUnit) && gramsPerInventoryUnit > 0;
+  const eachPerInventoryUnit = Number(conversion?.each_per_inventory_unit);
+  const hasEachConversion = Number.isFinite(eachPerInventoryUnit) && eachPerInventoryUnit > 0;
+  const alreadyConvertedEach = hasEachConversion
+    && row.inventory_uom === conversion?.inventory_uom
+    && String(row.quantity_uom || "").toLowerCase() === "each";
   return {
     ...row,
+    current_qty: hasEachConversion && !alreadyConvertedEach
+      ? Number(row.current_qty || 0) * eachPerInventoryUnit
+      : row.current_qty,
+    quantity_uom: hasEachConversion ? "each" : row.quantity_uom,
     inventory_uom: conversion?.inventory_uom || row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
     grams_per_inventory_unit: hasGramConversion ? gramsPerInventoryUnit : null,
     current_qty_grams: hasGramConversion ? Number(row.current_qty || 0) * gramsPerInventoryUnit : null,

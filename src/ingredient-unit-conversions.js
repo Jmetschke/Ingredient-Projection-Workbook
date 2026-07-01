@@ -18,7 +18,7 @@ export const INGREDIENT_UNIT_CONVERSIONS = [
   {"name":"Powdered Sugar","inventory_uom":"50lb Bag","grams_per_inventory_unit":22680},
   {"name":"Citric Acid","inventory_uom":"50lb Bucket","grams_per_inventory_unit":22680},
   {"name":"Distilled Water","inventory_uom":"5Gal Jug","grams_per_inventory_unit":3520},
-  {"name":"Whoppie Cookie","inventory_uom":"810ct Box","grams_per_inventory_unit":8627},
+  {"name":"Whoppie Cookie","inventory_uom":"800ct Unit","grams_per_inventory_unit":null,"each_per_inventory_unit":800},
   {"name":"Sodium Benzoate","inventory_uom":"8oz Pouch","grams_per_inventory_unit":227},
   {"name":"MCT Oil","inventory_uom":"MCT Gallon","grams_per_inventory_unit":3520},
   {"name":"Abstrax Triple Citrus","inventory_uom":"Abstrax Gallon","grams_per_inventory_unit":3834},
