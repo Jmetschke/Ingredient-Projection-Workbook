@@ -3,6 +3,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import dotenv from "dotenv";
 import express from "express";
+import PDFDocument from "pdfkit";
 import XLSX from "xlsx";
 import { all, one, run } from "./src/db.js";
 import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
@@ -906,6 +907,142 @@ async function scheduledIngredientUsageForecast(query = {}) {
   };
 }
 
+function forecastInventoryValue(row) {
+  if (row.current_inventory_value != null) return Number(row.current_inventory_value);
+  const uom = String(row.quantity_uom || "").toLowerCase();
+  if (uom === "each") return row.current_inventory == null ? null : Number(row.current_inventory);
+  if (uom === "grams" || uom === "gram") return row.current_inventory_grams == null ? null : Number(row.current_inventory_grams);
+  return row.current_inventory_grams == null
+    ? row.current_inventory == null ? null : Number(row.current_inventory)
+    : Number(row.current_inventory_grams);
+}
+
+function forecastRemainingValue(row) {
+  const inventory = forecastInventoryValue(row);
+  return inventory == null ? null : inventory - Number(row.required_qty || 0);
+}
+
+function formatReportQty(value) {
+  if (value == null || value === "") return "";
+  const n = Number(value || 0);
+  return Math.abs(n) >= 100
+    ? n.toLocaleString("en-US", { maximumFractionDigits: 0 })
+    : n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+function filteredForecastRows(rows, query = {}) {
+  const keyword = String(query.search || query.q || "").trim().toLowerCase();
+  const ingredientType = String(query.ingredient_type || query.type || "").trim();
+  const typeOrder = { Hijnx: 1, SB: 2, "SB/Hijnx": 3 };
+  return rows.filter((row) => {
+    const matchesKeyword = !keyword || ["ingredient_name", "quantity_uom", "products"].some((field) => (
+      String(row[field] ?? "").toLowerCase().includes(keyword)
+    ));
+    const matchesType = !ingredientType || row.ingredient_type === ingredientType;
+    return matchesKeyword && matchesType;
+  }).sort((a, b) => (typeOrder[a.ingredient_type] || 9) - (typeOrder[b.ingredient_type] || 9)
+    || String(a.ingredient_name || "").localeCompare(String(b.ingredient_name || "")));
+}
+
+function writePdfTableRow(doc, columns, values, options = {}) {
+  const startY = doc.y;
+  const padding = 4;
+  const heights = columns.map((column, index) => (
+    doc.heightOfString(String(values[index] ?? ""), {
+      width: column.width - padding * 2,
+      align: column.align || "left",
+    }) + padding * 2
+  ));
+  const rowHeight = Math.max(options.minHeight || 18, ...heights);
+  if (startY + rowHeight > doc.page.height - doc.page.margins.bottom) {
+    doc.addPage();
+  }
+  const y = doc.y;
+  let x = doc.page.margins.left;
+  columns.forEach((column, index) => {
+    doc.rect(x, y, column.width, rowHeight).stroke("#d9e2e5");
+    if (options.fill) doc.rect(x, y, column.width, rowHeight).fillAndStroke(options.fill, "#d9e2e5");
+    doc.fillColor(options.color || "#172026")
+      .font(options.bold ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(options.fontSize || 8)
+      .text(String(values[index] ?? ""), x + padding, y + padding, {
+        width: column.width - padding * 2,
+        align: column.align || "left",
+      });
+    x += column.width;
+  });
+  doc.y = y + rowHeight;
+}
+
+function streamForecastPdf(res, report, rows, query = {}) {
+  const doc = new PDFDocument({ size: "LETTER", layout: "landscape", margin: 32 });
+  const filename = `ingredient-forecast-${report.filters.start}-${report.filters.end}.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  doc.pipe(res);
+
+  const typeLabel = query.ingredient_type || query.type || "All types";
+  const searchLabel = query.search || query.q || "None";
+  doc.font("Helvetica-Bold").fontSize(18).fillColor("#172026").text("Ingredient Forecast Report");
+  doc.moveDown(0.25);
+  doc.font("Helvetica").fontSize(9).fillColor("#5f6c72")
+    .text(`${report.filters.start} through ${report.filters.end}`)
+    .text(`Time Period: ${report.filters.months} month${report.filters.months === 1 ? "" : "s"} | Search: ${searchLabel} | Item Type: ${typeLabel} | Rows: ${rows.length}`)
+    .text(`Generated: ${new Date().toLocaleString("en-US")}`);
+  doc.moveDown(0.75);
+
+  const totals = rows.reduce((map, row) => {
+    const uom = row.quantity_uom || "units";
+    map.set(uom, (map.get(uom) || 0) + Number(row.required_qty || 0));
+    return map;
+  }, new Map());
+  if (totals.size) {
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#172026").text("Scheduled Usage Totals");
+    doc.font("Helvetica").fontSize(9).fillColor("#172026")
+      .text([...totals.entries()].map(([uom, value]) => `${formatReportQty(value)} ${uom}`).join("   "));
+    doc.moveDown(0.75);
+  }
+
+  const columns = [
+    { label: "Ingredient", width: 150 },
+    { label: "Type", width: 42 },
+    { label: "Scheduled", width: 62, align: "right" },
+    { label: "On Hand", width: 62, align: "right" },
+    { label: "Remaining", width: 62, align: "right" },
+    { label: "UOM", width: 42 },
+    { label: "Batches", width: 45, align: "right" },
+    { label: "Products", width: 170 },
+    { label: "First Week", width: 62 },
+  ];
+  writePdfTableRow(doc, columns, columns.map((column) => column.label), {
+    bold: true,
+    fill: "#eef3f2",
+    fontSize: 7.5,
+    minHeight: 20,
+  });
+  rows.forEach((row) => {
+    const remaining = forecastRemainingValue(row);
+    writePdfTableRow(doc, columns, [
+      row.ingredient_name,
+      row.ingredient_type,
+      formatReportQty(row.required_qty),
+      formatReportQty(forecastInventoryValue(row)),
+      formatReportQty(remaining),
+      row.quantity_uom,
+      row.scheduled_batches || 0,
+      row.products || "",
+      row.first_week || "",
+    ], {
+      color: remaining < 0 ? "#b42318" : "#172026",
+      fill: remaining < 0 ? "#fde8e8" : "",
+    });
+  });
+  if (!rows.length) {
+    doc.font("Helvetica").fontSize(10).fillColor("#5f6c72").text("No forecast rows match the current filters.");
+  }
+  doc.end();
+}
+
 app.get("/api/health", async (req, res) => {
   try {
     const check = await one("SELECT 1 AS ok");
@@ -1298,6 +1435,16 @@ app.delete("/api/production-batches/:id", async (req, res) => {
 app.get("/api/forecast", async (req, res) => {
   try {
     ok(res, await scheduledIngredientUsageForecast(req.query));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.get("/api/export/forecast.pdf", async (req, res) => {
+  try {
+    const report = await scheduledIngredientUsageForecast(req.query);
+    const rows = filteredForecastRows(report.rows, req.query);
+    streamForecastPdf(res, report, rows, req.query);
   } catch (error) {
     fail(res, error);
   }

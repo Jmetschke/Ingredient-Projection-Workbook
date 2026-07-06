@@ -151,6 +151,13 @@ function filteredRows(rows, fields) {
   return rows.filter((row) => fields.some((field) => String(row[field] ?? "").toLowerCase().includes(needle)));
 }
 
+function forecastReportQuery() {
+  const params = new URLSearchParams({ months: String(state.forecastMonths || 6) });
+  if (state.forecastFilter) params.set("search", state.forecastFilter);
+  if (state.forecastIngredientType) params.set("ingredient_type", state.forecastIngredientType);
+  return `?${params.toString()}`;
+}
+
 function table(headers, rows, options = {}) {
   const body = rows.length ? rows.map((row) => {
     const klass = options.rowClass?.(row) || "";
@@ -895,6 +902,9 @@ async function renderForecast() {
   };
   document.querySelector("#forecast-print-report").onclick = () => {
     printForecastReport(forecastFilteredRows(state.forecastRows));
+  };
+  document.querySelector("#forecast-export-pdf").onclick = () => {
+    window.location.href = `/api/export/forecast.pdf${forecastReportQuery()}`;
   };
   uploadInput.onchange = () => uploadForecastInventoryPdf(uploadInput);
   document.querySelector("#forecast-inventory-clear").onclick = async () => {
