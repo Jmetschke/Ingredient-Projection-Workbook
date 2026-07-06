@@ -1759,6 +1759,9 @@ function renderFormulaEditor(formulas) {
   const rows = filteredRows(formulas, ["ingredient_name", "quantity_uom"]);
   const masterIngredients = state.ingredients.filter((ingredient) => Number(ingredient.is_master));
   const html = rows.length ? `
+    <div class="formula-editor-toolbar">
+      <button id="save-formula-changes" type="button">Save Formula Changes</button>
+    </div>
     <div class="table-wrap editor-table-wrap">
       <table class="editor-table">
         <thead><tr><th>Ingredient</th><th class="numeric">Qty / Unit</th><th>UOM</th><th>Actions</th></tr></thead>
@@ -1786,6 +1789,26 @@ function renderFormulaEditor(formulas) {
       const ingredient = state.ingredients.find((item) => String(item.id) === String(select.value));
       select.closest("tr").querySelector(".formula-row-uom").textContent = ingredient?.bom_uom || "grams";
     });
+  });
+  document.querySelector("#save-formula-changes")?.addEventListener("click", async () => {
+    const formulaRows = [...document.querySelectorAll("#formula-table tr[data-formula-id]")];
+    if (!formulaRows.length) return;
+    setMessage("#formula-message", `Saving ${formulaRows.length} BOM ingredient${formulaRows.length === 1 ? "" : "s"}...`);
+    try {
+      for (const row of formulaRows) {
+        await api(`/api/formulas/${row.dataset.formulaId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            ingredient_id: row.querySelector(".formula-edit-ingredient").value,
+            quantity_per_unit: row.querySelector(".formula-edit-quantity").value,
+          }),
+        });
+      }
+      setMessage("#formula-message", "Formula changes saved.", "success");
+      await refreshFormulaManager();
+    } catch (error) {
+      setMessage("#formula-message", error.message, "error");
+    }
   });
   document.querySelectorAll(".save-formula").forEach((button) => {
     button.addEventListener("click", async () => {

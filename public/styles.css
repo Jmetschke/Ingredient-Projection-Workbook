@@ -1191,6 +1191,16 @@ tr.warning td {
   margin-bottom: 12px;
 }
 
+.formula-editor-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0;
+}
+
+.formula-editor-toolbar button {
+  min-width: 190px;
+}
+
 .formula-product-create-panel {
   margin-top: 4px;
 }
