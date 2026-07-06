@@ -72,6 +72,17 @@ function forecastInventoryDisplay(row) {
   return value == null ? "" : qty(value);
 }
 
+function forecastRemainingValue(row) {
+  const inventory = forecastInventoryValue(row);
+  if (inventory == null) return null;
+  return inventory - Number(row.required_qty || 0);
+}
+
+function forecastRemainingDisplay(row) {
+  const value = forecastRemainingValue(row);
+  return value == null ? "" : qty(value);
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -922,6 +933,12 @@ function renderForecastTable(rows) {
     { label: "Type", key: "ingredient_type" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
     { label: "Current Inventory", numeric: true, value: (r) => forecastInventoryDisplay(r) },
+    {
+      label: "Remaining",
+      numeric: true,
+      value: (r) => forecastRemainingDisplay(r),
+      className: (r) => forecastRemainingValue(r) < 0 ? "shortage" : "",
+    },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
@@ -1035,6 +1052,7 @@ function printForecastReport(rows) {
       <td>${escapeHtml(row.ingredient_type)}</td>
       <td class="numeric">${qty(row.required_qty)}</td>
       <td class="numeric">${forecastInventoryDisplay(row)}</td>
+      <td class="numeric ${forecastRemainingValue(row) < 0 ? "shortage" : ""}">${forecastRemainingDisplay(row)}</td>
       <td>${escapeHtml(row.quantity_uom)}</td>
       <td class="numeric">${escapeHtml(row.scheduled_batches)}</td>
       <td>${escapeHtml(row.products || "")}</td>
@@ -1062,6 +1080,7 @@ function printForecastReport(rows) {
           th, td { border: 1px solid #d9e2e5; padding: 6px 7px; vertical-align: top; text-align: left; }
           th { background: #eef3f2; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
           .numeric { text-align: right; white-space: nowrap; }
+          .shortage { background: #fde8e8; color: #b42318; font-weight: 700; }
           .empty { color: #5f6c72; border: 1px dashed #cfd8dc; padding: 14px; }
           tr { break-inside: avoid; page-break-inside: avoid; }
           @page { margin: 0.45in; }
@@ -1086,7 +1105,7 @@ function printForecastReport(rows) {
         ${rows.length ? `
           <table>
             <thead>
-              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory</th><th class="numeric">Remaining</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>
