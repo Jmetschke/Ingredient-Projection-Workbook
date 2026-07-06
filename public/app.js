@@ -1758,6 +1758,7 @@ function updateFormulaUomDisplay() {
 function renderFormulaEditor(formulas) {
   const rows = filteredRows(formulas, ["ingredient_name", "quantity_uom"]);
   const masterIngredients = state.ingredients.filter((ingredient) => Number(ingredient.is_master));
+  const saveAllButton = document.querySelector("#formula-save-all");
   const html = rows.length ? `
     <div class="table-wrap editor-table-wrap">
       <table class="editor-table">
@@ -1781,6 +1782,7 @@ function renderFormulaEditor(formulas) {
     </div>
   ` : `<div class="empty-calendar">No BOM ingredients for this batch.</div>`;
   document.querySelector("#formula-table").innerHTML = html;
+  if (saveAllButton) saveAllButton.disabled = !rows.length;
   document.querySelectorAll(".formula-edit-ingredient").forEach((select) => {
     select.addEventListener("change", () => {
       const ingredient = state.ingredients.find((item) => String(item.id) === String(select.value));
@@ -1792,13 +1794,7 @@ function renderFormulaEditor(formulas) {
       const row = button.closest("tr");
       setMessage("#formula-message", "Saving BOM ingredient...");
       try {
-        await api(`/api/formulas/${row.dataset.formulaId}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            ingredient_id: row.querySelector(".formula-edit-ingredient").value,
-            quantity_per_unit: row.querySelector(".formula-edit-quantity").value,
-          }),
-        });
+        await saveFormulaRow(row);
         setMessage("#formula-message", "BOM ingredient saved.", "success");
         await refreshFormulaManager();
       } catch (error) {
@@ -1820,6 +1816,37 @@ function renderFormulaEditor(formulas) {
       }
     });
   });
+}
+
+async function saveFormulaRow(row) {
+  return api(`/api/formulas/${row.dataset.formulaId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ingredient_id: row.querySelector(".formula-edit-ingredient").value,
+      quantity_per_unit: row.querySelector(".formula-edit-quantity").value,
+    }),
+  });
+}
+
+async function saveAllFormulaChanges() {
+  const rows = Array.from(document.querySelectorAll("#formula-table tr[data-formula-id]"));
+  if (!rows.length) return;
+
+  const button = document.querySelector("#formula-save-all");
+  if (button) button.disabled = true;
+  setMessage("#formula-message", `Saving ${rows.length} BOM ingredient${rows.length === 1 ? "" : "s"}...`);
+
+  try {
+    for (const row of rows) {
+      await saveFormulaRow(row);
+    }
+    setMessage("#formula-message", "Formula changes saved.", "success");
+    await refreshFormulaManager();
+  } catch (error) {
+    setMessage("#formula-message", error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 const renderers = {
@@ -1913,6 +1940,7 @@ document.querySelector("#velocity-size-form").addEventListener("submit", async (
 });
 
 document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);
+document.querySelector("#formula-save-all").addEventListener("click", saveAllFormulaChanges);
 
 document.querySelector("#formula-product-form").addEventListener("submit", async (event) => {
   event.preventDefault();

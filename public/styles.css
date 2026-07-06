@@ -970,6 +970,16 @@ tr.warning td {
   vertical-align: middle;
 }
 
+.formula-save-all-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0;
+}
+
+.formula-save-all-actions button {
+  min-width: 190px;
+}
+
 .batch-editor-list {
   display: grid;
   gap: 10px;

@@ -19,6 +19,16 @@ let calendarSchemaCache = { expiresAt: 0, schema: null };
 let forwardWeeksEnsuredKey = "";
 let forwardWeeksEnsurePromise = null;
 
+const SNACKBAR_VAPE_PACKAGING = new Map([
+  ["Snackbar Vape - Cherry Pomegranate Lemon 2g", "Cherry Pomegranate Lemon 2g"],
+  ["Snackbar Vape - Grape Crush", "Grape Chrush 1g"],
+  ["Snackbar Vape - Lemon Yuzu", "Lemon Yuzu 1g"],
+  ["Snackbar Vape - Mango Magic", "Magic Mango 1g"],
+  ["Snackbar Vape - Peach Passion Fruit 2g", "Peach Passionfruit 2g"],
+  ["Snackbar Vape - Strawberry Dragonfruit 2g", "Starwberry Dragon Fruit 2g"],
+  ["Snackbar Vape - Watermelon Lychee 1g", "Watermelon Lychee 1g"],
+]);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.resolve("public")));
 
@@ -43,6 +53,22 @@ function normalizeIngredientUom(value, name = "") {
 function normalizeIngredientType(value) {
   const raw = String(value || "").trim();
   return INGREDIENT_TYPES.has(raw) ? raw : "SB/Hijnx";
+}
+
+function snackbarPackagingKind(ingredientName = "") {
+  if (ingredientName.startsWith("Pouch - ")) return "Pouch";
+  if (ingredientName.startsWith("Vape - ")) return "Vape";
+  return "";
+}
+
+function snackbarPackagingName(productName, kind) {
+  const packageSuffix = SNACKBAR_VAPE_PACKAGING.get(productName);
+  return packageSuffix && kind ? `${kind} - ${packageSuffix}` : "";
+}
+
+async function snackbarPackagingIngredientForProduct(productName, kind) {
+  const ingredientName = snackbarPackagingName(productName, kind);
+  return ingredientName ? one("SELECT id, name, purchase_uom FROM ingredients WHERE name = ?", [ingredientName]) : null;
 }
 
 function normalizeMatchText(value) {
@@ -452,6 +478,39 @@ async function activeMasterIngredients() {
     ORDER BY name
   `);
   return rows.map(withBomUom);
+}
+
+async function ensureSnackbarPackagingBomMatchesProducts() {
+  const rows = await all(`
+    SELECT pf.id,
+           pf.product_id,
+           pf.ingredient_id,
+           p.name AS product_name,
+           i.name AS ingredient_name
+    FROM product_formulas pf
+    JOIN products p ON p.id = pf.product_id
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE p.category = 'Snackbar'
+      AND pf.source_sheet IS NULL
+      AND (i.name LIKE 'Pouch - %' OR i.name LIKE 'Vape - %')
+  `);
+  for (const row of rows) {
+    const kind = snackbarPackagingKind(row.ingredient_name);
+    const targetIngredient = await snackbarPackagingIngredientForProduct(row.product_name, kind);
+    if (!targetIngredient || Number(targetIngredient.id) === Number(row.ingredient_id)) continue;
+    const duplicate = await one(
+      "SELECT id FROM product_formulas WHERE product_id = ? AND ingredient_id = ? AND source_sheet IS NULL LIMIT 1",
+      [row.product_id, targetIngredient.id],
+    );
+    if (duplicate) {
+      await run("DELETE FROM product_formulas WHERE id = ?", [row.id]);
+    } else {
+      await run(
+        "UPDATE product_formulas SET ingredient_id = ?, quantity_uom = ? WHERE id = ?",
+        [targetIngredient.id, normalizeIngredientUom(targetIngredient.purchase_uom, targetIngredient.name), row.id],
+      );
+    }
+  }
 }
 
 async function replaceLatestInventoryRows(rows) {
@@ -1555,17 +1614,33 @@ app.post("/api/formulas/copy", async (req, res) => {
       return fail(res, new Error("Select valid production batches"), 400);
     }
     const sourceFormulas = await all(`
-      SELECT ingredient_id, quantity_per_unit, quantity_uom, notes
-      FROM product_formulas
-      WHERE product_id = ? AND source_sheet IS NULL
-      ORDER BY id
+      SELECT pf.ingredient_id, pf.quantity_per_unit, pf.quantity_uom, pf.notes,
+             i.name AS ingredient_name
+      FROM product_formulas pf
+      JOIN ingredients i ON i.id = pf.ingredient_id
+      WHERE pf.product_id = ? AND pf.source_sheet IS NULL
+      ORDER BY pf.id
     `, [source_product_id]);
     if (!sourceFormulas.length) {
       return fail(res, new Error("The selected batch does not have a BOM to copy"), 400);
     }
 
     await run("DELETE FROM product_formulas WHERE product_id = ? AND source_sheet IS NULL", [target_product_id]);
+    const remappedFormulas = new Map();
     for (const formula of sourceFormulas) {
+      const kind = snackbarPackagingKind(formula.ingredient_name);
+      const targetIngredient = await snackbarPackagingIngredientForProduct(targetProduct.name, kind);
+      const ingredientId = targetIngredient?.id || formula.ingredient_id;
+      const quantityUom = targetIngredient
+        ? normalizeIngredientUom(targetIngredient.purchase_uom, targetIngredient.name)
+        : formula.quantity_uom;
+      remappedFormulas.set(String(ingredientId), {
+        ...formula,
+        ingredient_id: ingredientId,
+        quantity_uom: quantityUom,
+      });
+    }
+    for (const formula of remappedFormulas.values()) {
       await run(
         `INSERT INTO product_formulas
           (product_id, ingredient_id, quantity_per_unit, quantity_uom, notes)
@@ -1576,7 +1651,7 @@ app.post("/api/formulas/copy", async (req, res) => {
     ok(res, {
       source_product_id: Number(source_product_id),
       target_product_id: Number(target_product_id),
-      copied: sourceFormulas.length,
+      copied: remappedFormulas.size,
     });
   } catch (error) {
     fail(res, error);
@@ -1668,6 +1743,8 @@ app.get("/api/export/production-ingredients", async (req, res) => {
     fail(res, error);
   }
 });
+
+await ensureSnackbarPackagingBomMatchesProducts();
 
 app.listen(port, () => {
   console.log(`Planning app listening on http://localhost:${port}`);
