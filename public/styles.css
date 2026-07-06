@@ -877,7 +877,7 @@ tr.warning td {
 
 .production-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(340px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) minmax(480px, 0.7fr);
   gap: 16px;
   align-items: start;
 }
@@ -968,6 +968,82 @@ tr.warning td {
 
 .editor-table td {
   vertical-align: middle;
+}
+
+.batch-editor-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(64vh, 720px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.batch-editor-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+}
+
+.batch-editor-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.batch-editor-summary strong {
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.batch-editor-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.batch-editor-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.batch-editor-field span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.batch-editor-card select,
+.batch-editor-card input {
+  min-width: 0;
+  width: 100%;
+}
+
+.batch-editor-product select {
+  font-weight: 700;
+}
+
+.batch-editor-controls {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(78px, 0.75fr) minmax(180px, 1.6fr) minmax(88px, 0.75fr);
+}
+
+.batch-editor-actions {
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.batch-editor-actions button {
+  min-height: 36px;
+  width: 100%;
 }
 
 .row-actions {
@@ -1414,6 +1490,11 @@ pre {
 
   .row-actions {
     flex-wrap: wrap;
+  }
+
+  .batch-editor-controls,
+  .batch-editor-actions {
+    grid-template-columns: 1fr;
   }
 
   .row-actions button {

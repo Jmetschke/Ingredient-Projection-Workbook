@@ -410,45 +410,54 @@ function renderProductionTotals(batches, weeks) {
 function productionBatchEditorRow(batch, products, weeks, batchTypes) {
   const matchingProducts = products.filter((product) => product.category === batch.batch_type);
   return `
-    <tr data-batch-id="${batch.id}">
-      <td>
-        <select class="batch-edit-type" aria-label="Batch type">
-          ${optionList(batchTypes.map((type) => ({ id: type, name: type })), batch.batch_type)}
-        </select>
-      </td>
-      <td>
+    <div class="batch-editor-card" data-batch-id="${batch.id}">
+      <div class="batch-editor-summary">
+        <strong>${escapeHtml(batch.product_name)}</strong>
+        <span>${escapeHtml(batch.batch_type)} · ${qty(batch.quantity)}</span>
+      </div>
+      <label class="batch-editor-field batch-editor-product">
+        <span>Product</span>
         <select class="batch-edit-product" aria-label="Product">
           ${optionList(matchingProducts, batch.product_id)}
         </select>
-      </td>
-      <td>
+      </label>
+      <div class="batch-editor-controls">
+        <label class="batch-editor-field">
+          <span>Type</span>
+          <select class="batch-edit-type" aria-label="Batch type">
+            ${optionList(batchTypes.map((type) => ({ id: type, name: type })), batch.batch_type)}
+          </select>
+        </label>
+        <label class="batch-editor-field">
+          <span>Week</span>
         <select class="batch-edit-week" aria-label="Production week">
           ${optionList(weeks, batch.week_id, (week) => week.label)}
         </select>
-      </td>
-      <td><input class="batch-edit-quantity" aria-label="Quantity" type="number" min="1" step="1" value="${escapeHtml(batch.quantity)}"></td>
-      <td class="row-actions">
-        <button class="small secondary save-batch" type="button">Save</button>
-        <button class="small danger delete-batch" type="button">Delete</button>
-      </td>
-    </tr>
+        </label>
+        <label class="batch-editor-field">
+          <span>Qty</span>
+          <input class="batch-edit-quantity" aria-label="Quantity" type="number" min="1" step="1" value="${escapeHtml(batch.quantity)}">
+        </label>
+        <div class="batch-editor-actions">
+          <button class="small secondary save-batch" type="button">Save</button>
+          <button class="small danger delete-batch" type="button">Delete</button>
+        </div>
+      </div>
+    </div>
   `;
 }
 
 function renderProductionBatchEditor(batches, products, weeks, batchTypes) {
   const rows = filteredRows(batches, ["week_start", "batch_type", "product_name"]);
   const html = rows.length ? `
-    <div class="table-wrap editor-table-wrap">
-      <table class="editor-table">
-        <thead><tr><th>Type</th><th>Product</th><th>Week</th><th class="numeric">Qty</th><th>Actions</th></tr></thead>
-        <tbody>${rows.map((batch) => productionBatchEditorRow(batch, products, weeks, batchTypes)).join("")}</tbody>
-      </table>
+    <div class="batch-editor-list">
+      ${rows.map((batch) => productionBatchEditorRow(batch, products, weeks, batchTypes)).join("")}
     </div>
   ` : `<div class="empty-calendar">No scheduled batches in this filter.</div>`;
   document.querySelector("#production-batches").innerHTML = html;
   document.querySelectorAll(".batch-edit-type").forEach((select) => {
     select.addEventListener("change", () => {
-      const row = select.closest("tr");
+      const row = select.closest(".batch-editor-card");
       const productSelect = row.querySelector(".batch-edit-product");
       const matchingProducts = products.filter((product) => product.category === select.value);
       productSelect.innerHTML = optionList(matchingProducts, matchingProducts[0]?.id);
@@ -456,7 +465,7 @@ function renderProductionBatchEditor(batches, products, weeks, batchTypes) {
   });
   document.querySelectorAll(".save-batch").forEach((button) => {
     button.addEventListener("click", async () => {
-      const row = button.closest("tr");
+      const row = button.closest(".batch-editor-card");
       setMessage("#production-message", "Saving batch...");
       try {
         await api(`/api/production-batches/${row.dataset.batchId}`, {
@@ -477,7 +486,7 @@ function renderProductionBatchEditor(batches, products, weeks, batchTypes) {
   });
   document.querySelectorAll(".delete-batch").forEach((button) => {
     button.addEventListener("click", async () => {
-      const row = button.closest("tr");
+      const row = button.closest(".batch-editor-card");
       if (!confirm("Delete this scheduled batch?")) return;
       setMessage("#production-message", "Deleting batch...");
       try {
