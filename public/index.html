@@ -202,14 +202,14 @@
         </div>
         <div class="forecast-tools">
           <label class="form-field">
-            <span>Time Period</span>
-            <select id="forecast-months">
-              <option value="1">1 month</option>
-              <option value="3">3 months</option>
-              <option value="6">6 months</option>
-              <option value="9">9 months</option>
-              <option value="12">12 months</option>
-            </select>
+            <span>Time Period (Weeks)</span>
+            <input id="forecast-weeks" type="number" min="1" step="1" value="26" list="forecast-week-options">
+            <datalist id="forecast-week-options">
+              <option value="4" label="1 month"></option>
+              <option value="13" label="3 months"></option>
+              <option value="26" label="6 months"></option>
+              <option value="39" label="9 months"></option>
+            </datalist>
           </label>
           <label class="form-field">
             <span>Ingredient Search</span>
@@ -413,6 +413,6 @@
 
     </main>
 
-    <script src="/app.js?v=20260706-forecast-pdf-export"></script>
+    <script src="/app.js?v=20260706-forecast-weeks"></script>
   </body>
 </html>

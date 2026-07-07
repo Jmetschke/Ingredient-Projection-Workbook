@@ -770,10 +770,10 @@ async function productionIngredientReport(query = {}) {
   };
 }
 
-function forecastDateWindow(months = 6) {
+function forecastDateWindowWeeks(weeks = 26) {
   const start = nextProductionWeekStart(new Date());
-  const end = new Date(start);
-  end.setMonth(end.getMonth() + months);
+  const weekCount = Number.isFinite(Number(weeks)) && Number(weeks) > 0 ? Math.round(Number(weeks)) : 26;
+  const end = addDateDays(start, weekCount * 7);
   return {
     start: localIsoDate(start),
     end: localIsoDate(end),
@@ -781,8 +781,12 @@ function forecastDateWindow(months = 6) {
 }
 
 async function scheduledIngredientUsageForecast(query = {}) {
-  const monthCount = [1, 3, 6, 9, 12].includes(Number(query.months)) ? Number(query.months) : 6;
-  const { start, end } = forecastDateWindow(monthCount);
+  const legacyMonthWeeks = { 1: 4, 3: 13, 6: 26, 9: 39, 12: 52 };
+  const requestedWeeks = Number(query.weeks);
+  const weekCount = Number.isFinite(requestedWeeks) && requestedWeeks > 0
+    ? Math.round(requestedWeeks)
+    : legacyMonthWeeks[Number(query.months)] || 26;
+  const { start, end } = forecastDateWindowWeeks(weekCount);
   const rows = await all(`
     SELECT i.id AS ingredient_id,
            i.name AS ingredient_name,
@@ -899,7 +903,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
     ORDER BY w.week_start, i.name, p.name
   `, { start, end });
   return {
-    filters: { months: monthCount, start, end },
+    filters: { weeks: weekCount, start, end },
     rows: rowsWithInventory,
     detail,
     inventoryRows,
@@ -987,7 +991,7 @@ function streamForecastPdf(res, report, rows, query = {}) {
   doc.moveDown(0.25);
   doc.font("Helvetica").fontSize(9).fillColor("#5f6c72")
     .text(`${report.filters.start} through ${report.filters.end}`)
-    .text(`Time Period: ${report.filters.months} month${report.filters.months === 1 ? "" : "s"} | Search: ${searchLabel} | Item Type: ${typeLabel} | Rows: ${rows.length}`)
+    .text(`Time Period: ${report.filters.weeks} week${report.filters.weeks === 1 ? "" : "s"} | Search: ${searchLabel} | Item Type: ${typeLabel} | Rows: ${rows.length}`)
     .text(`Generated: ${new Date().toLocaleString("en-US")}`);
   doc.moveDown(0.75);
 
@@ -1058,7 +1062,7 @@ app.get("/api/health", async (req, res) => {
 
 app.get("/api/summary", async (req, res) => {
   try {
-    const ingredientUsage = await scheduledIngredientUsageForecast({ months: 6 });
+    const ingredientUsage = await scheduledIngredientUsageForecast({ weeks: 26 });
     const dashboardStartDate = nextProductionWeekStart(new Date());
     const dashboardStart = localIsoDate(dashboardStartDate);
     const dashboardEnd = localIsoDate(addDateDays(dashboardStartDate, 24 * 7));

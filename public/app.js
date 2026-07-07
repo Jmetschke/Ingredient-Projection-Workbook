@@ -8,7 +8,7 @@ const state = {
   productionStartWeek: "",
   productionEndWeek: "",
   rlCalendarMonths: 6,
-  forecastMonths: 6,
+  forecastWeeks: 26,
   forecastFilter: "",
   forecastIngredientType: "",
   forecastRows: [],
@@ -152,7 +152,7 @@ function filteredRows(rows, fields) {
 }
 
 function forecastReportQuery() {
-  const params = new URLSearchParams({ months: String(state.forecastMonths || 6) });
+  const params = new URLSearchParams({ weeks: String(state.forecastWeeks || 26) });
   if (state.forecastFilter) params.set("search", state.forecastFilter);
   if (state.forecastIngredientType) params.set("ingredient_type", state.forecastIngredientType);
   return `?${params.toString()}`;
@@ -881,13 +881,14 @@ async function renderRlScheduledBatches() {
 }
 
 async function renderForecast() {
-  const monthsSelect = document.querySelector("#forecast-months");
+  const weeksInput = document.querySelector("#forecast-weeks");
   const filterInput = document.querySelector("#forecast-filter");
   const typeSelect = document.querySelector("#forecast-ingredient-type");
   const uploadInput = document.querySelector("#forecast-inventory-upload");
-  monthsSelect.value = String(state.forecastMonths);
-  monthsSelect.onchange = async () => {
-    state.forecastMonths = Number(monthsSelect.value) || 6;
+  weeksInput.value = String(state.forecastWeeks);
+  weeksInput.onchange = async () => {
+    state.forecastWeeks = Math.max(1, Math.round(Number(weeksInput.value) || 26));
+    weeksInput.value = String(state.forecastWeeks);
     await renderForecast();
   };
   filterInput.value = state.forecastFilter;
@@ -917,7 +918,7 @@ async function renderForecast() {
       setMessage("#forecast-inventory-message", error.message, "error");
     }
   };
-  const data = await api(`/api/forecast?months=${state.forecastMonths}`);
+  const data = await api(`/api/forecast?weeks=${state.forecastWeeks}`);
   const forecastWindow = document.querySelector("#forecast-window");
   forecastWindow.textContent = `${data.filters.start} through ${data.filters.end}`;
   forecastWindow.className = "source-note";
@@ -1113,7 +1114,7 @@ function printForecastReport(rows) {
             <div>${escapeHtml(windowLabel)}</div>
           </div>
           <div class="meta">
-            <div>Time Period: ${state.forecastMonths} month${state.forecastMonths === 1 ? "" : "s"}</div>
+            <div>Time Period: ${state.forecastWeeks} week${state.forecastWeeks === 1 ? "" : "s"}</div>
             <div>Search: ${escapeHtml(searchLabel)}</div>
             <div>Item Type: ${escapeHtml(typeLabel)}</div>
             <div>Rows: ${rows.length}</div>
