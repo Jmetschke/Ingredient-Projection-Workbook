@@ -1,11 +1,11 @@
 // PWA service worker for installability and a small offline shell fallback.
 // It intentionally keeps live API, export, and Turso-backed data requests network-only.
-const CACHE_NAME = "production-planning-pwa-v8";
+const CACHE_NAME = "production-planning-pwa-v9";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
-  "/app.js?v=20260706-forecast-weeks",
+  "/app.js?v=20260707-force-pwa-refresh",
   "/manifest.json",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -32,6 +32,12 @@ self.addEventListener("activate", (event) => {
         .map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("fetch", (event) => {
