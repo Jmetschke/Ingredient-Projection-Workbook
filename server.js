@@ -200,9 +200,20 @@ function pdfCMap(buffer, objectId) {
 }
 
 function distruFontMaps(buffer) {
-  // Distru valuation PDFs rendered by Chromium/Skia keep the visible table in F4-F9
-  // and place the ToUnicode maps in these companion objects.
-  const candidateMaps = { F4: 1705, F5: 1722, F6: 1741, F7: 1753, F8: 1793, F9: 1862 };
+  const source = buffer.toString("latin1");
+  const dynamicMapIds = [];
+  const toUnicodeRe = /\/ToUnicode\s+(\d+)\s+0\s+R/g;
+  let match;
+  while ((match = toUnicodeRe.exec(source))) {
+    const objectId = Number(match[1]);
+    if (!dynamicMapIds.includes(objectId)) dynamicMapIds.push(objectId);
+  }
+  // Distru valuation PDFs rendered by Chromium/Skia use F4-F9 for the visible table.
+  // The ToUnicode object ids change between exports, so discover them dynamically.
+  const fontNames = ["F4", "F5", "F6", "F7", "F8", "F9"];
+  const candidateMaps = dynamicMapIds.length >= fontNames.length
+    ? Object.fromEntries(fontNames.map((font, index) => [font, dynamicMapIds[index]]))
+    : { F4: 1705, F5: 1722, F6: 1741, F7: 1753, F8: 1793, F9: 1862 };
   return new Map(
     Object.entries(candidateMaps)
       .map(([font, objectId]) => [font, pdfCMap(buffer, objectId)])
