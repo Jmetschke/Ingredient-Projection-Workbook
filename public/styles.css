@@ -16,7 +16,7 @@
 
 html {
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 body {
@@ -28,7 +28,7 @@ body {
   grid-template-columns: 236px minmax(0, 1fr);
   min-height: 100vh;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .sidebar {
@@ -73,6 +73,7 @@ nav button.active, nav button:hover {
 main {
   min-width: 0;
   padding: 22px;
+  overflow-x: clip;
 }
 
 .topbar {
@@ -244,6 +245,9 @@ section {
   max-height: 68vh;
   border: 1px solid var(--line);
   border-radius: 8px;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
 }
 
 table {
@@ -732,12 +736,12 @@ tr.warning td {
 }
 
 #forecast {
-  overflow: hidden;
+  overflow: visible;
 }
 
 #forecast-table .table-wrap {
   max-height: none;
-  overflow-x: hidden;
+  overflow-x: auto;
   width: 100%;
 }
 
@@ -1262,6 +1266,12 @@ pre {
 }
 
 @media (max-width: 900px) {
+  html,
+  body,
+  main {
+    overflow-x: auto;
+  }
+
   body {
     grid-template-columns: 1fr;
   }
@@ -1446,13 +1456,15 @@ pre {
   .table-wrap:not(.editor-table-wrap):not(.velocity-size-table-wrap):not(.velocity-schedule-table) {
     border: 0;
     max-height: none;
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: visible;
   }
 
   #forecast-table .table-wrap {
     border: 0;
     max-height: none;
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: visible;
   }
 
   .table-wrap:not(.editor-table-wrap):not(.velocity-size-table-wrap):not(.velocity-schedule-table) table,
