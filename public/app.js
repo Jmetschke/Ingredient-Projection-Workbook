@@ -889,6 +889,7 @@ async function renderForecast() {
   const weeksInput = document.querySelector("#forecast-weeks");
   const startInput = document.querySelector("#forecast-start");
   const endInput = document.querySelector("#forecast-end");
+  const applyRangeButton = document.querySelector("#forecast-apply-range");
   const filterInput = document.querySelector("#forecast-filter");
   const typeSelect = document.querySelector("#forecast-ingredient-type");
   const uploadInput = document.querySelector("#forecast-inventory-upload");
@@ -920,8 +921,9 @@ async function renderForecast() {
     state.forecastWeeks = Math.max(1, Math.ceil((end - start) / MS_PER_DAY / 7));
     await renderForecast();
   };
-  startInput.onchange = updateForecastDateRange;
-  endInput.onchange = updateForecastDateRange;
+  startInput.oninput = () => setMessage("#forecast-window", "Press Apply Date Range to refresh the forecast for this range.");
+  endInput.oninput = () => setMessage("#forecast-window", "Press Apply Date Range to refresh the forecast for this range.");
+  applyRangeButton.onclick = updateForecastDateRange;
   filterInput.value = state.forecastFilter;
   filterInput.oninput = () => {
     state.forecastFilter = filterInput.value.trim();
