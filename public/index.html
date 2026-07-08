@@ -227,10 +227,13 @@
           </label>
           <button id="forecast-print-report" type="button">Print Forecast Report</button>
           <button id="forecast-export-pdf" type="button">Export PDF</button>
-          <label class="file-action">
-            <span>Upload Inventory PDF</span>
-            <input id="forecast-inventory-upload" type="file" accept="application/pdf,.pdf">
-          </label>
+          <div class="inventory-upload-field">
+            <label class="file-action">
+              <span>Upload Inventory PDF</span>
+              <input id="forecast-inventory-upload" type="file" accept="application/pdf,.pdf">
+            </label>
+            <div class="upload-instructions">Use Inventory Valuation Report from Distru, Flitering for 'Non-Mertc Items' only.</div>
+          </div>
           <button id="forecast-inventory-clear" type="button">Clear Current Inventory</button>
           <div id="forecast-window" class="source-note"></div>
         </div>

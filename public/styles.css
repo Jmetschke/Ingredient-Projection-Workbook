@@ -715,6 +715,17 @@ tr.warning td {
   white-space: normal;
 }
 
+.inventory-upload-field {
+  display: grid;
+  gap: 6px;
+}
+
+.upload-instructions {
+  color: #73818a;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
 .forecast-tools .source-note {
   grid-column: 1 / -1;
   min-height: 18px;
