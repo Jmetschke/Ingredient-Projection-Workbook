@@ -316,6 +316,8 @@ function withInventoryConversion(row, matchedName = "") {
 }
 
 function rowsFromDistruInventoryPdf(buffer) {
+  const finishedGoodBrands = new Set(["hijnx", "snackbar", "pheotera"]);
+  const finishedGoodNamePattern = /^(hijnx|snackbar|pheotera)\s+(edible|beverage|tincture|1g vapes|2g vapes)?\s*\|/i;
   const grouped = new Map();
   for (const item of extractDistruInventoryTextItems(buffer)) {
     const key = `${item.page}:${Math.round(item.y)}`;
@@ -325,6 +327,9 @@ function rowsFromDistruInventoryPdf(buffer) {
   return [...grouped.values()].map((items) => {
     const sorted = items.sort((a, b) => a.x - b.x);
     const uploadedName = cleanPdfCell(sorted.filter((item) => item.x < 220).map((item) => item.text).join(""));
+    // Distru includes finished-good/METRC rows when "Exclude METRC items" is off.
+    // Those rows are identified by the Brand column; ingredient/package rows leave it blank.
+    const brand = cleanPdfCell(sorted.filter((item) => item.x >= 340 && item.x < 405).map((item) => item.text).join(""));
     // The valuation report has Available around x=484 and On Hand around x=650.
     // Current Inventory uses On Hand when present and falls back to Available.
     const onHand = pdfColumnNumber(sorted, 640, 700);
@@ -332,16 +337,22 @@ function rowsFromDistruInventoryPdf(buffer) {
     const currentQty = onHand ?? available;
     return {
       uploaded_name: uploadedName,
+      brand,
       current_qty: currentQty,
       quantity_uom: guessInventoryUom(uploadedName),
     };
   }).filter((row) => {
     const normalizedName = normalizeMatchText(row.uploaded_name);
+    const normalizedBrand = normalizeMatchText(row.brand);
     return row.uploaded_name
       && Number.isFinite(row.current_qty)
+      && !finishedGoodBrands.has(normalizedBrand)
+      && !finishedGoodNamePattern.test(row.uploaded_name)
       && !["name", "total"].includes(normalizedName)
       && !(normalizedName.split(" ").length <= 1 && Number(row.current_qty || 0) === 0)
       && normalizedName.length > 2;
+  }).map(({ brand, ...row }) => {
+    return row;
   });
 }
 
