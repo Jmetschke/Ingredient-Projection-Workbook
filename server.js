@@ -282,6 +282,7 @@ function pdfColumnNumber(items, minX, maxX = Infinity) {
     .map((item) => item.text)
     .join("")
     .replace(/[^\d.\-]/g, "");
+  if (!/\d/.test(raw)) return null;
   const number = Number(raw);
   return Number.isFinite(number) ? number : null;
 }
@@ -324,7 +325,7 @@ function rowsFromDistruInventoryPdf(buffer) {
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(item);
   }
-  return [...grouped.values()].map((items) => {
+  const lineRows = [...grouped.values()].map((items) => {
     const sorted = items.sort((a, b) => a.x - b.x);
     const uploadedName = cleanPdfCell(sorted.filter((item) => item.x < 220).map((item) => item.text).join(""));
     // Distru includes finished-good/METRC rows when "Exclude METRC items" is off.
@@ -336,12 +337,43 @@ function rowsFromDistruInventoryPdf(buffer) {
     const available = pdfColumnNumber(sorted, 475, 535);
     const currentQty = onHand ?? available;
     return {
+      page: sorted[0]?.page || 0,
+      y: sorted[0]?.y || 0,
       uploaded_name: uploadedName,
       brand,
       current_qty: currentQty,
       quantity_uom: guessInventoryUom(uploadedName),
     };
-  }).filter((row) => {
+  }).sort((a, b) => a.page - b.page || a.y - b.y);
+  const consumed = new Set();
+  const mergedRows = lineRows.map((row, index) => {
+    if (consumed.has(index) || Number.isFinite(row.current_qty)) return row;
+    const nearbyRows = lineRows
+      .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+      .filter(({ candidate, candidateIndex }) => (
+        candidateIndex > index
+        && candidate.page === row.page
+        && candidate.y - row.y > 0
+        && candidate.y - row.y <= 18
+      ));
+    const quantityRow = nearbyRows.find(({ candidate }) => !candidate.uploaded_name && Number.isFinite(candidate.current_qty));
+    if (!quantityRow) return row;
+    const continuationNames = nearbyRows
+      .filter(({ candidate }) => candidate.uploaded_name && !Number.isFinite(candidate.current_qty))
+      .map(({ candidate, candidateIndex }) => {
+        consumed.add(candidateIndex);
+        return candidate.uploaded_name;
+      });
+    consumed.add(quantityRow.candidateIndex);
+    const mergedName = cleanPdfCell([row.uploaded_name, ...continuationNames].join(" "));
+    return {
+      ...row,
+      uploaded_name: mergedName,
+      current_qty: quantityRow.candidate.current_qty,
+      quantity_uom: guessInventoryUom(mergedName),
+    };
+  }).filter((_, index) => !consumed.has(index));
+  return mergedRows.filter((row) => {
     const normalizedName = normalizeMatchText(row.uploaded_name);
     const normalizedBrand = normalizeMatchText(row.brand);
     return row.uploaded_name
@@ -351,7 +383,7 @@ function rowsFromDistruInventoryPdf(buffer) {
       && !["name", "total"].includes(normalizedName)
       && !(normalizedName.split(" ").length <= 1 && Number(row.current_qty || 0) === 0)
       && normalizedName.length > 2;
-  }).map(({ brand, ...row }) => {
+  }).map(({ page, y, brand, ...row }) => {
     return row;
   });
 }
