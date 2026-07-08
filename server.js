@@ -834,13 +834,30 @@ function forecastDateWindowWeeks(weeks = 26) {
   };
 }
 
-async function scheduledIngredientUsageForecast(query = {}) {
+function forecastDateWindow(query = {}) {
   const legacyMonthWeeks = { 1: 4, 3: 13, 6: 26, 9: 39, 12: 52 };
   const requestedWeeks = Number(query.weeks);
   const weekCount = Number.isFinite(requestedWeeks) && requestedWeeks > 0
     ? Math.round(requestedWeeks)
     : legacyMonthWeeks[Number(query.months)] || 26;
-  const { start, end } = forecastDateWindowWeeks(weekCount);
+  const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
+  const defaultWindow = forecastDateWindowWeeks(weekCount);
+  const start = isoPattern.test(String(query.start || "")) ? String(query.start) : defaultWindow.start;
+  let end = isoPattern.test(String(query.end || "")) ? String(query.end) : "";
+  if (!end || end <= start) {
+    end = localIsoDate(addDateDays(new Date(`${start}T00:00:00`), weekCount * 7));
+  }
+  const days = Math.max(1, Math.round((new Date(`${end}T00:00:00`) - new Date(`${start}T00:00:00`)) / (24 * 60 * 60 * 1000)));
+  return {
+    weeks: Math.max(1, Math.ceil(days / 7)),
+    start,
+    end,
+    baselineStart: defaultWindow.start,
+  };
+}
+
+async function scheduledIngredientUsageForecast(query = {}) {
+  const { weeks: weekCount, start, end, baselineStart } = forecastDateWindow(query);
   const rows = await all(`
     SELECT i.id AS ingredient_id,
            i.name AS ingredient_name,
@@ -864,6 +881,23 @@ async function scheduledIngredientUsageForecast(query = {}) {
     HAVING required_qty > 0
     ORDER BY i.name, quantity_uom
   `, { start, end });
+  const priorRows = baselineStart < start ? await all(`
+    SELECT i.id AS ingredient_id,
+           COALESCE(pf.quantity_uom, 'grams') AS quantity_uom,
+           SUM(pb.quantity * COALESCE(pf.quantity_per_unit, 0)) AS prior_required_qty
+    FROM production_batches pb
+    JOIN weeks w ON w.id = pb.week_id
+    JOIN product_formulas pf ON pf.product_id = pb.product_id AND pf.source_sheet IS NULL
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE pb.quantity > 0
+      AND w.week_start >= @baselineStart
+      AND w.week_start < @start
+    GROUP BY i.id, COALESCE(pf.quantity_uom, 'grams')
+  `, { baselineStart, start }) : [];
+  const priorUsageByKey = new Map(priorRows.map((row) => [
+    `${row.ingredient_id}:${String(row.quantity_uom || "").toLowerCase()}`,
+    Number(row.prior_required_qty || 0),
+  ]));
   const inventoryRows = await latestInventoryRows();
   const inventoryByIngredient = new Map();
   const inventoryByName = new Map();
@@ -897,12 +931,18 @@ async function scheduledIngredientUsageForecast(query = {}) {
     const currentInventoryGrams = isEach
       ? inventory?.current_qty ?? null
       : inventory?.current_qty_grams ?? inventory?.current_qty ?? null;
+    const priorUsage = priorUsageByKey.get(`${row.ingredient_id}:${rowUom}`) || 0;
+    const startingInventoryValue = currentInventoryValue == null
+      ? null
+      : Math.max(0, Number(currentInventoryValue || 0) - priorUsage);
     return {
       ...row,
       quantity_uom: row.quantity_uom || inventory?.quantity_uom || "grams",
       current_inventory: inventory ? inventory.current_qty : null,
       current_inventory_grams: currentInventoryGrams,
       current_inventory_value: currentInventoryValue,
+      prior_usage_qty: priorUsage,
+      starting_inventory_value: startingInventoryValue,
       current_inventory_uom: isEach ? "each" : "grams",
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
       inventory_source_uom: inventory?.inventory_uom || "",
@@ -957,7 +997,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
     ORDER BY w.week_start, i.name, p.name
   `, { start, end });
   return {
-    filters: { weeks: weekCount, start, end },
+    filters: { weeks: weekCount, start, end, baseline_start: baselineStart },
     rows: rowsWithInventory,
     detail,
     inventoryRows,
@@ -966,6 +1006,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
 }
 
 function forecastInventoryValue(row) {
+  if (row.starting_inventory_value != null) return Number(row.starting_inventory_value);
   if (row.current_inventory_value != null) return Number(row.current_inventory_value);
   const uom = String(row.quantity_uom || "").toLowerCase();
   if (uom === "each") return row.current_inventory == null ? null : Number(row.current_inventory);
@@ -1065,7 +1106,7 @@ function streamForecastPdf(res, report, rows, query = {}) {
     { label: "Ingredient", width: 150 },
     { label: "Type", width: 42 },
     { label: "Scheduled", width: 62, align: "right" },
-    { label: "On Hand", width: 62, align: "right" },
+    { label: "Inventory Start", width: 62, align: "right" },
     { label: "Remaining", width: 62, align: "right" },
     { label: "UOM", width: 42 },
     { label: "Batches", width: 45, align: "right" },

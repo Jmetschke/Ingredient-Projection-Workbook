@@ -9,6 +9,8 @@ const state = {
   productionEndWeek: "",
   rlCalendarMonths: 6,
   forecastWeeks: 26,
+  forecastStart: "",
+  forecastEnd: "",
   forecastFilter: "",
   forecastIngredientType: "",
   forecastRows: [],
@@ -58,6 +60,7 @@ function qty(value) {
 }
 
 function forecastInventoryValue(row) {
+  if (row.starting_inventory_value != null) return Number(row.starting_inventory_value);
   if (row.current_inventory_value != null) return Number(row.current_inventory_value);
   const uom = String(row.quantity_uom || "").toLowerCase();
   if (uom === "each") return row.current_inventory == null ? null : Number(row.current_inventory);
@@ -153,6 +156,8 @@ function filteredRows(rows, fields) {
 
 function forecastReportQuery() {
   const params = new URLSearchParams({ weeks: String(state.forecastWeeks || 26) });
+  if (state.forecastStart) params.set("start", state.forecastStart);
+  if (state.forecastEnd) params.set("end", state.forecastEnd);
   if (state.forecastFilter) params.set("search", state.forecastFilter);
   if (state.forecastIngredientType) params.set("ingredient_type", state.forecastIngredientType);
   return `?${params.toString()}`;
@@ -882,15 +887,41 @@ async function renderRlScheduledBatches() {
 
 async function renderForecast() {
   const weeksInput = document.querySelector("#forecast-weeks");
+  const startInput = document.querySelector("#forecast-start");
+  const endInput = document.querySelector("#forecast-end");
   const filterInput = document.querySelector("#forecast-filter");
   const typeSelect = document.querySelector("#forecast-ingredient-type");
   const uploadInput = document.querySelector("#forecast-inventory-upload");
+  if (!state.forecastStart || !state.forecastEnd) {
+    const start = parseIsoDate(nextProductionWeekStartIso());
+    state.forecastStart = isoDate(start);
+    state.forecastEnd = isoDate(addDays(start, state.forecastWeeks * 7));
+  }
   weeksInput.value = String(state.forecastWeeks);
+  startInput.value = state.forecastStart;
+  endInput.value = state.forecastEnd;
   weeksInput.onchange = async () => {
     state.forecastWeeks = Math.max(1, Math.round(Number(weeksInput.value) || 26));
     weeksInput.value = String(state.forecastWeeks);
+    const start = parseIsoDate(state.forecastStart) || parseIsoDate(nextProductionWeekStartIso());
+    state.forecastStart = isoDate(start);
+    state.forecastEnd = isoDate(addDays(start, state.forecastWeeks * 7));
     await renderForecast();
   };
+  const updateForecastDateRange = async () => {
+    const start = parseIsoDate(startInput.value);
+    const end = parseIsoDate(endInput.value);
+    if (!start || !end || end <= start) {
+      setMessage("#forecast-window", "Choose an end date after the start date.", "error");
+      return;
+    }
+    state.forecastStart = isoDate(start);
+    state.forecastEnd = isoDate(end);
+    state.forecastWeeks = Math.max(1, Math.ceil((end - start) / MS_PER_DAY / 7));
+    await renderForecast();
+  };
+  startInput.onchange = updateForecastDateRange;
+  endInput.onchange = updateForecastDateRange;
   filterInput.value = state.forecastFilter;
   filterInput.oninput = () => {
     state.forecastFilter = filterInput.value.trim();
@@ -918,9 +949,15 @@ async function renderForecast() {
       setMessage("#forecast-inventory-message", error.message, "error");
     }
   };
-  const data = await api(`/api/forecast?weeks=${state.forecastWeeks}`);
+  const data = await api(`/api/forecast${forecastReportQuery()}`);
   const forecastWindow = document.querySelector("#forecast-window");
-  forecastWindow.textContent = `${data.filters.start} through ${data.filters.end}`;
+  state.forecastWeeks = data.filters.weeks || state.forecastWeeks;
+  state.forecastStart = data.filters.start || state.forecastStart;
+  state.forecastEnd = data.filters.end || state.forecastEnd;
+  weeksInput.value = String(state.forecastWeeks);
+  startInput.value = state.forecastStart;
+  endInput.value = state.forecastEnd;
+  forecastWindow.textContent = `${state.forecastStart} through ${state.forecastEnd}. Inventory shown is projected available at the start date after earlier scheduled usage.`;
   forecastWindow.className = "source-note";
   state.forecastRows = data.rows || [];
   state.forecastInventoryRows = data.inventoryRows || [];
@@ -952,7 +989,7 @@ function renderForecastTable(rows) {
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Type", key: "ingredient_type" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
-    { label: "Current Inventory", numeric: true, value: (r) => forecastInventoryDisplay(r) },
+    { label: "Inventory At Start", numeric: true, value: (r) => forecastInventoryDisplay(r) },
     {
       label: "Remaining",
       numeric: true,
@@ -1125,7 +1162,7 @@ function printForecastReport(rows) {
         ${rows.length ? `
           <table>
             <thead>
-              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Current Inventory</th><th class="numeric">Remaining</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Inventory At Start</th><th class="numeric">Remaining</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>
