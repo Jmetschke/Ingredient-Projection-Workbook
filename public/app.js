@@ -287,7 +287,7 @@ async function renderProduction() {
   const reportStartSelect = document.querySelector("#production-filter-start");
   const reportEndSelect = document.querySelector("#production-filter-end");
   const weeks = data.weeks.map(weekMeta);
-  const rollingStartWeek = nextProductionWeekStartIso();
+  const rollingStartWeek = currentWeekStartIso();
   const schedulingWeeks = weeks.filter((week) => week.week_start >= rollingStartWeek);
   const weekOptions = schedulingWeeks.length ? schedulingWeeks : weeks;
   const defaultWeeks = visibleCalendarWeeks(weeks, state.productionCalendarMonths);
@@ -612,7 +612,7 @@ function renderProductionWeekFocus(batches, weeks, products, batchTypes) {
 }
 
 function visibleCalendarWeeks(weeks, monthCount) {
-  const firstVisible = parseIsoDate(nextProductionWeekStartIso());
+  const firstVisible = parseIsoDate(currentWeekStartIso());
   const lastVisible = addMonths(firstVisible, monthCount);
   return weeks.filter((week) => week.blockEnd >= firstVisible && week.blockStart < lastVisible);
 }
