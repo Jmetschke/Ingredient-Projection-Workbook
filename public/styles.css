@@ -740,8 +740,8 @@ tr.warning td {
 }
 
 #forecast-table .table-wrap {
-  max-height: none;
-  overflow-x: auto;
+  max-height: min(68vh, 720px);
+  overflow: auto;
   width: 100%;
 }
 
@@ -1461,10 +1461,9 @@ pre {
   }
 
   #forecast-table .table-wrap {
-    border: 0;
-    max-height: none;
-    overflow-x: auto;
-    overflow-y: visible;
+    border: 1px solid var(--line);
+    max-height: 62vh;
+    overflow: auto;
   }
 
   .table-wrap:not(.editor-table-wrap):not(.velocity-size-table-wrap):not(.velocity-schedule-table) table,
@@ -1509,6 +1508,40 @@ pre {
     font-size: 11px;
     font-weight: 800;
     text-transform: uppercase;
+  }
+
+  #forecast-table .table-wrap table {
+    display: table;
+    min-width: 920px;
+    width: 100%;
+  }
+
+  #forecast-table .table-wrap thead {
+    display: table-header-group;
+  }
+
+  #forecast-table .table-wrap tbody {
+    display: table-row-group;
+  }
+
+  #forecast-table .table-wrap tr {
+    display: table-row;
+    margin-bottom: 0;
+  }
+
+  #forecast-table .table-wrap th,
+  #forecast-table .table-wrap td {
+    display: table-cell;
+    width: auto;
+  }
+
+  #forecast-table .table-wrap td {
+    border-right: 1px solid var(--line);
+    white-space: normal;
+  }
+
+  #forecast-table .table-wrap td::before {
+    content: none;
   }
 
   .velocity-schedule-table {
