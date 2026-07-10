@@ -1420,10 +1420,21 @@ async function velocitySchedulePlan(form) {
 }
 
 function renderVelocitySchedulePreview(plan) {
-  const initialSelectedTotal = plan.existing.length + plan.proposed.length;
+  if (!plan.selectedProposedIndexes) {
+    plan.selectedProposedIndexes = new Set(plan.proposed.map((_, index) => index));
+  }
+  const selectedProposedIndexes = plan.selectedProposedIndexes instanceof Set
+    ? plan.selectedProposedIndexes
+    : new Set(plan.selectedProposedIndexes || []);
+  [...selectedProposedIndexes].forEach((index) => {
+    if (index < 0 || index >= plan.proposed.length) selectedProposedIndexes.delete(index);
+  });
+  plan.selectedProposedIndexes = selectedProposedIndexes;
+  const initialSelectedCount = selectedProposedIndexes.size;
+  const initialSelectedTotal = plan.existing.length + initialSelectedCount;
   const initialOverCount = Math.max(0, initialSelectedTotal - plan.targetCount);
   const warning = initialOverCount > 0
-    ? `<div id="velocity-preview-alert" class="form-message error">There are too many entries selected. Existing plus recommended batches total ${initialSelectedTotal}, which is ${initialOverCount} over the velocity target of ${plan.targetCount}. Clear recommended batches or delete existing planner entries until this alert clears.</div>`
+    ? `<div id="velocity-preview-alert" class="form-message error">There are too many entries selected. Existing plus selected recommended batches total ${initialSelectedTotal}, which is ${initialOverCount} over the velocity target of ${plan.targetCount}. Clear recommended batches or delete existing planner entries until this alert clears.</div>`
     : `<div id="velocity-preview-alert" class="form-message success">Existing plus selected recommended batches total ${initialSelectedTotal} against a velocity target of ${plan.targetCount}.</div>`;
   const existingRows = plan.existing.map((batch) => `
     <tr data-batch-id="${batch.id}">
@@ -1435,7 +1446,7 @@ function renderVelocitySchedulePreview(plan) {
   `).join("");
   const proposedRows = plan.proposed.map((batch, index) => `
     <tr data-proposed-index="${index}">
-      <td><input class="velocity-proposed-select" type="checkbox" checked aria-label="Select proposed batch"></td>
+      <td><input class="velocity-proposed-select" type="checkbox" ${selectedProposedIndexes.has(index) ? "checked" : ""} aria-label="Select proposed batch"></td>
       <td>${escapeHtml(batch.label)}</td>
       <td>${escapeHtml(batch.product_name)}</td>
       <td class="numeric">${qty(batch.quantity)}</td>
@@ -1446,7 +1457,7 @@ function renderVelocitySchedulePreview(plan) {
     <div class="velocity-schedule-summary">
       <div><strong>${plan.targetCount}</strong><span>Target Entries</span></div>
       <div><strong>${plan.existing.length}</strong><span>Scheduled Existing</span></div>
-      <div><strong id="velocity-selected-count">${plan.proposed.length}</strong><span>Selected Recommended</span></div>
+      <div><strong id="velocity-selected-count">${initialSelectedCount}</strong><span>Selected Recommended</span></div>
       <div><strong id="velocity-selected-total">${initialSelectedTotal}</strong><span>Total After Add</span></div>
       <div><strong id="velocity-over-count">${initialOverCount}</strong><span>Over Target</span></div>
       <div><strong>${plan.firstScheduleWeek ? escapeHtml(plan.firstScheduleWeek.week_start) : ""}</strong><span>Target First Week</span></div>
@@ -1477,8 +1488,13 @@ function renderVelocitySchedulePreview(plan) {
   const selectedIndexes = () => Array.from(document.querySelectorAll(".velocity-proposed-select:checked"))
     .map((input) => Number(input.closest("tr").dataset.proposedIndex))
     .filter((index) => Number.isInteger(index));
+  const syncSelectedIndexes = () => {
+    plan.selectedProposedIndexes = new Set(selectedIndexes());
+    state.velocitySchedulePreview = plan;
+    return plan.selectedProposedIndexes;
+  };
   const refreshSelectionState = () => {
-    const selectedCount = selectedIndexes().length;
+    const selectedCount = syncSelectedIndexes().size;
     const selectedTotal = plan.existing.length + selectedCount;
     const overCount = Math.max(0, selectedTotal - plan.targetCount);
     const alert = document.querySelector("#velocity-preview-alert");
@@ -1497,10 +1513,14 @@ function renderVelocitySchedulePreview(plan) {
   };
   document.querySelector("#velocity-select-all-proposed")?.addEventListener("click", () => {
     document.querySelectorAll(".velocity-proposed-select").forEach((input) => { input.checked = true; });
+    plan.selectedProposedIndexes = new Set(plan.proposed.map((_, index) => index));
+    state.velocitySchedulePreview = plan;
     refreshSelectionState();
   });
   document.querySelector("#velocity-clear-proposed")?.addEventListener("click", () => {
     document.querySelectorAll(".velocity-proposed-select").forEach((input) => { input.checked = false; });
+    plan.selectedProposedIndexes = new Set();
+    state.velocitySchedulePreview = plan;
     refreshSelectionState();
   });
   document.querySelectorAll(".velocity-proposed-select").forEach((input) => {
@@ -1552,9 +1572,11 @@ function renderVelocitySchedulePreview(plan) {
       if (!confirm("Delete this scheduled batch entry?")) return;
       setMessage("#velocity-schedule-message", "Deleting scheduled batch...");
       try {
+        const preservedSelectedIndexes = new Set(selectedIndexes());
         await api(`/api/production-batches/${row.dataset.batchId}`, { method: "DELETE" });
         setMessage("#velocity-schedule-message", "Scheduled batch deleted. Rebuilding preview...", "success");
         state.velocitySchedulePreview = await velocitySchedulePlan(document.querySelector("#velocity-schedule-form"));
+        state.velocitySchedulePreview.selectedProposedIndexes = preservedSelectedIndexes;
         await refreshVelocityPlannedBatches();
         renderVelocityTable(state.velocityProducts);
         renderVelocitySchedulePreview(state.velocitySchedulePreview);
