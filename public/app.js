@@ -27,6 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
+const APP_VERSION = "20260710-pwa-shell-v11";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const titles = {
@@ -2145,10 +2146,32 @@ updateInstallButton();
 // PWA: register the online-first service worker without blocking the live app startup.
 if ("serviceWorker" in navigator) {
   let refreshingForServiceWorker = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
+  const refreshInstalledApp = async () => {
     if (refreshingForServiceWorker) return;
     refreshingForServiceWorker = true;
-    window.location.reload();
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set("appVersion", APP_VERSION);
+    window.location.replace(url.toString());
+  };
+  const checkAppVersion = async () => {
+    try {
+      const response = await fetch(`/app-version.json?v=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.version && data.version !== APP_VERSION) await refreshInstalledApp();
+    } catch {
+      // Version checks should never block normal app use.
+    }
+  };
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    refreshInstalledApp();
+  });
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "APP_VERSION_UPDATED") refreshInstalledApp();
   });
 
   window.addEventListener("load", async () => {
@@ -2167,9 +2190,14 @@ if ("serviceWorker" in navigator) {
       if (registration.waiting) {
         registration.waiting.postMessage({ type: "SKIP_WAITING" });
       }
+      await checkAppVersion();
     } catch (error) {
       console.warn("Service worker registration failed", error);
     }
+  });
+  window.addEventListener("focus", checkAppVersion);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkAppVersion();
   });
 }
 

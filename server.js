@@ -21,6 +21,12 @@ let forwardWeeksEnsuredKey = "";
 let forwardWeeksEnsurePromise = null;
 
 app.use(express.json({ limit: "10mb" }));
+app.use((req, res, next) => {
+  if (["/", "/index.html", "/app.js", "/styles.css", "/service-worker.js", "/app-version.json"].includes(req.path)) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  }
+  next();
+});
 app.use(express.static(path.resolve("public")));
 
 function ok(res, data) {
