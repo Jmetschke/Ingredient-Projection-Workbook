@@ -1,11 +1,11 @@
 // PWA service worker for installability and a small offline shell fallback.
 // It intentionally keeps live API, export, and Turso-backed data requests network-only.
-const CACHE_NAME = "production-planning-pwa-v9";
+const CACHE_NAME = "production-planning-pwa-v10";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
-  "/app.js?v=20260707-force-pwa-refresh",
+  "/app.js?v=20260710-velocity-upload-refresh",
   "/manifest.json",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
