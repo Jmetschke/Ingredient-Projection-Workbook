@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260710-pwa-shell-v11";
+const APP_VERSION = "20260714-formula-batch-qty-v13";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const titles = {
@@ -85,6 +85,25 @@ function forecastRemainingValue(row) {
 function forecastRemainingDisplay(row) {
   const value = forecastRemainingValue(row);
   return value == null ? "" : qty(value);
+}
+
+function forecastNeededToOrderValue(row) {
+  if (row.needed_to_order_qty != null) return Number(row.needed_to_order_qty);
+  const remaining = forecastRemainingValue(row);
+  return remaining == null ? null : Math.max(0, -remaining);
+}
+
+function forecastNeededToOrderDisplay(row) {
+  const value = forecastNeededToOrderValue(row);
+  return value == null ? "Inventory needed" : qty(value);
+}
+
+function forecastOrderUnitsDisplay(row) {
+  const needed = forecastNeededToOrderValue(row);
+  if (needed == null) return "";
+  if (needed <= 0) return "0";
+  if (row.order_units_needed == null) return "";
+  return `${qty(row.order_units_needed)} × ${escapeHtml(row.order_unit_uom || "units")}`;
 }
 
 function escapeHtml(value) {
@@ -897,7 +916,7 @@ async function renderForecast() {
   if (!state.forecastStart || !state.forecastEnd) {
     const start = parseIsoDate(nextProductionWeekStartIso());
     state.forecastStart = isoDate(start);
-    state.forecastEnd = isoDate(addDays(start, state.forecastWeeks * 7));
+    state.forecastEnd = isoDate(addDays(start, state.forecastWeeks * 7 - 1));
   }
   weeksInput.value = String(state.forecastWeeks);
   startInput.value = state.forecastStart;
@@ -907,19 +926,19 @@ async function renderForecast() {
     weeksInput.value = String(state.forecastWeeks);
     const start = parseIsoDate(state.forecastStart) || parseIsoDate(nextProductionWeekStartIso());
     state.forecastStart = isoDate(start);
-    state.forecastEnd = isoDate(addDays(start, state.forecastWeeks * 7));
+    state.forecastEnd = isoDate(addDays(start, state.forecastWeeks * 7 - 1));
     await renderForecast();
   };
   const updateForecastDateRange = async () => {
     const start = parseIsoDate(startInput.value);
     const end = parseIsoDate(endInput.value);
-    if (!start || !end || end <= start) {
-      setMessage("#forecast-window", "Choose an end date after the start date.", "error");
+    if (!start || !end || end < start) {
+      setMessage("#forecast-window", "Choose an end date on or after the start date.", "error");
       return;
     }
     state.forecastStart = isoDate(start);
     state.forecastEnd = isoDate(end);
-    state.forecastWeeks = Math.max(1, Math.ceil((end - start) / MS_PER_DAY / 7));
+    state.forecastWeeks = Math.max(1, Math.ceil(((end - start) / MS_PER_DAY + 1) / 7));
     await renderForecast();
   };
   startInput.oninput = () => setMessage("#forecast-window", "Press Apply Date Range to refresh the forecast for this range.");
@@ -960,7 +979,7 @@ async function renderForecast() {
   weeksInput.value = String(state.forecastWeeks);
   startInput.value = state.forecastStart;
   endInput.value = state.forecastEnd;
-  forecastWindow.textContent = `${state.forecastStart} through ${state.forecastEnd}. Inventory shown is projected available at the start date after earlier scheduled usage.`;
+  forecastWindow.textContent = `${state.forecastStart} through ${state.forecastEnd}, inclusive. Usage is totaled from scheduled Production Planner batches. Inventory at start is current inventory less earlier scheduled usage.`;
   forecastWindow.className = "source-note";
   state.forecastRows = data.rows || [];
   state.forecastInventoryRows = data.inventoryRows || [];
@@ -988,10 +1007,11 @@ function forecastFilteredRows(rows) {
 
 function renderForecastTable(rows) {
   const filtered = forecastFilteredRows(rows);
+  renderForecastSummary(filtered);
   document.querySelector("#forecast-table").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Type", key: "ingredient_type" },
-    { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
+    { label: "Usage in Date Range", numeric: true, value: (r) => qty(r.required_qty) },
     { label: "Inventory At Start", numeric: true, value: (r) => forecastInventoryDisplay(r) },
     {
       label: "Remaining",
@@ -999,12 +1019,49 @@ function renderForecastTable(rows) {
       value: (r) => forecastRemainingDisplay(r),
       className: (r) => forecastRemainingValue(r) < 0 ? "shortage" : "",
     },
+    {
+      label: "Need to Order",
+      numeric: true,
+      value: (r) => forecastNeededToOrderDisplay(r),
+      className: (r) => forecastNeededToOrderValue(r) > 0 ? "shortage order-needed" : "",
+    },
+    { label: "Purchase Units", value: (r) => forecastOrderUnitsDisplay(r) },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
     { label: "First Week", key: "first_week" },
     { label: "Last Week", key: "last_week" },
   ], filtered);
+}
+
+function renderForecastSummary(rows) {
+  const host = document.querySelector("#forecast-summary");
+  if (!host) return;
+  const totals = rows.reduce((map, row) => {
+    const uom = row.quantity_uom || "units";
+    const current = map.get(uom) || { usage: 0, order: 0 };
+    current.usage += Number(row.required_qty || 0);
+    current.order += Number(forecastNeededToOrderValue(row) || 0);
+    map.set(uom, current);
+    return map;
+  }, new Map());
+  const shortages = rows.filter((row) => forecastNeededToOrderValue(row) > 0).length;
+  const missingInventory = rows.filter((row) => forecastNeededToOrderValue(row) == null && Number(row.required_qty || 0) > 0).length;
+  const totalsHtml = [...totals.entries()].map(([uom, values]) => `
+    <div class="forecast-summary-card">
+      <span>${escapeHtml(uom)}</span>
+      <strong>${qty(values.usage)} usage</strong>
+      <em class="${values.order > 0 ? "shortage-text" : ""}">${qty(values.order)} to order</em>
+    </div>
+  `).join("");
+  host.innerHTML = `
+    <div class="forecast-summary-card ${shortages ? "warning-card" : ""}">
+      <span>Shortage Summary</span>
+      <strong>${shortages} ingredient${shortages === 1 ? "" : "s"} need ordering</strong>
+      <em>${missingInventory ? `${missingInventory} missing inventory values` : "Inventory calculations complete"}</em>
+    </div>
+    ${totalsHtml}
+  `;
 }
 
 function renderForecastUnmatchedInventory() {
@@ -1100,11 +1157,14 @@ function printForecastReport(rows) {
   const searchLabel = state.forecastFilter || "None";
   const totalQtyByUom = rows.reduce((totals, row) => {
     const uom = row.quantity_uom || "units";
-    totals.set(uom, (totals.get(uom) || 0) + Number(row.required_qty || 0));
+    const current = totals.get(uom) || { usage: 0, order: 0 };
+    current.usage += Number(row.required_qty || 0);
+    current.order += Number(forecastNeededToOrderValue(row) || 0);
+    totals.set(uom, current);
     return totals;
   }, new Map());
-  const totalsHtml = Array.from(totalQtyByUom.entries()).map(([uom, amount]) => (
-    `<div><strong>${qty(amount)}</strong><span>${escapeHtml(uom)}</span></div>`
+  const totalsHtml = Array.from(totalQtyByUom.entries()).map(([uom, values]) => (
+    `<div><strong>${qty(values.usage)} ${escapeHtml(uom)}</strong><span>Usage · ${qty(values.order)} to order</span></div>`
   )).join("");
   const rowsHtml = rows.map((row) => `
     <tr>
@@ -1113,6 +1173,8 @@ function printForecastReport(rows) {
       <td class="numeric">${qty(row.required_qty)}</td>
       <td class="numeric">${forecastInventoryDisplay(row)}</td>
       <td class="numeric ${forecastRemainingValue(row) < 0 ? "shortage" : ""}">${forecastRemainingDisplay(row)}</td>
+      <td class="numeric ${forecastNeededToOrderValue(row) > 0 ? "shortage" : ""}">${forecastNeededToOrderDisplay(row)}</td>
+      <td>${forecastOrderUnitsDisplay(row)}</td>
       <td>${escapeHtml(row.quantity_uom)}</td>
       <td class="numeric">${escapeHtml(row.scheduled_batches)}</td>
       <td>${escapeHtml(row.products || "")}</td>
@@ -1165,7 +1227,7 @@ function printForecastReport(rows) {
         ${rows.length ? `
           <table>
             <thead>
-              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Scheduled Usage</th><th class="numeric">Inventory At Start</th><th class="numeric">Remaining</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Usage in Date Range</th><th class="numeric">Inventory At Start</th><th class="numeric">Remaining</th><th class="numeric">Need to Order</th><th>Purchase Units</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>
@@ -1778,7 +1840,7 @@ async function refreshFormulaManager() {
     return `
       <button class="batch-list-item ${active}" data-product="${product.id}">
         <strong>${escapeHtml(product.name)}</strong>
-        <span>${escapeHtml(product.category || "")} · ${count} ingredients</span>
+        <span>${escapeHtml(product.category || "")} · Batch QTY ${product.batch_size == null ? "Not set" : qty(product.batch_size)} · ${count} ingredients</span>
       </button>
     `;
   }).join("") || `<div class="empty-calendar">No production batches found.</div>`;
@@ -1793,6 +1855,12 @@ async function refreshFormulaManager() {
   form.querySelector("input[name='product_id']").value = selectedProduct?.id || "";
   document.querySelector("#formula-focus-title").textContent = selectedProduct ? selectedProduct.name : "Select a batch";
   document.querySelector("#formula-focus-meta").textContent = selectedProduct ? `${selectedProduct.category || ""} BOM` : "";
+  const batchSizeForm = document.querySelector("#formula-batch-size-form");
+  const batchSizeInput = batchSizeForm.querySelector("input[name='batch_size']");
+  batchSizeForm.querySelector("input[name='product_id']").value = selectedProduct?.id || "";
+  batchSizeInput.value = selectedProduct?.batch_size ?? "";
+  batchSizeInput.disabled = !selectedProduct;
+  batchSizeForm.querySelector("button").disabled = !selectedProduct;
   updateFormulaUomDisplay();
 
   const selectedFormulas = data.formulas.filter((formula) => String(formula.product_id) === String(state.selectedFormulaProductId));
@@ -2009,6 +2077,25 @@ document.querySelector("#velocity-size-form").addEventListener("submit", async (
 });
 
 document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);
+
+document.querySelector("#formula-batch-size-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const productId = form.querySelector("input[name='product_id']").value;
+  const batchSize = form.querySelector("input[name='batch_size']").value;
+  if (!productId) return;
+  setMessage("#formula-message", "Saving Batch QTY...");
+  try {
+    await api(`/api/velocity-batch-sizes/${productId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ batch_size: batchSize }),
+    });
+    setMessage("#formula-message", "Batch QTY saved.", "success");
+    await refreshFormulaManager();
+  } catch (error) {
+    setMessage("#formula-message", error.message, "error");
+  }
+});
 
 document.querySelector("#formula-product-form").addEventListener("submit", async (event) => {
   event.preventDefault();

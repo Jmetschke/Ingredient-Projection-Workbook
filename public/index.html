@@ -197,8 +197,8 @@
 
       <section id="forecast" class="view">
         <div class="section-head">
-          <h2>Scheduled Ingredient Usage</h2>
-          <span>Production Planner BOM totals</span>
+          <h2>Ingredient Usage &amp; Order Needs</h2>
+          <span>Choose an inclusive date range to total scheduled BOM usage and calculate shortages</span>
         </div>
         <div class="forecast-tools">
           <label class="form-field">
@@ -212,11 +212,11 @@
             </datalist>
           </label>
           <label class="form-field">
-            <span>Start Date</span>
+            <span>Usage Start Date</span>
             <input id="forecast-start" type="date">
           </label>
           <label class="form-field">
-            <span>End Date</span>
+            <span>Usage End Date (Inclusive)</span>
             <input id="forecast-end" type="date">
           </label>
           <button id="forecast-apply-range" type="button">Apply Date Range</button>
@@ -248,6 +248,7 @@
         </div>
         <div id="forecast-inventory-message" class="source-note"></div>
         <div id="forecast-unmatched-inventory"></div>
+        <div id="forecast-summary" class="forecast-summary"></div>
         <div id="forecast-table"></div>
       </section>
 
@@ -365,6 +366,15 @@
               <h2 id="formula-focus-title">Select a batch</h2>
               <span id="formula-focus-meta"></span>
             </div>
+            <form id="formula-batch-size-form" class="inline-form formula-batch-size-form">
+              <input name="product_id" type="hidden">
+              <label class="form-field">
+                <span>Batch QTY</span>
+                <input name="batch_size" aria-label="Batch QTY" type="number" min="0.000001" step="0.000001" required>
+              </label>
+              <button type="submit">Save Batch QTY</button>
+              <span class="source-note">Used as the standard quantity when scheduling this production batch.</span>
+            </form>
             <div class="bom-copy-panel">
               <h3>Copy Existing BOM</h3>
               <form id="formula-copy-form" class="inline-form bom-copy-form">
@@ -425,6 +435,6 @@
 
     </main>
 
-    <script src="/app.js?v=20260710-pwa-shell-v11"></script>
+    <script src="/app.js?v=20260714-formula-batch-qty-v13"></script>
   </body>
 </html>

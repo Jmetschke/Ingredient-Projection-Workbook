@@ -833,7 +833,7 @@ async function productionIngredientReport(query = {}) {
 function forecastDateWindowWeeks(weeks = 26) {
   const start = nextProductionWeekStart(new Date());
   const weekCount = Number.isFinite(Number(weeks)) && Number(weeks) > 0 ? Math.round(Number(weeks)) : 26;
-  const end = addDateDays(start, weekCount * 7);
+  const end = addDateDays(start, weekCount * 7 - 1);
   return {
     start: localIsoDate(start),
     end: localIsoDate(end),
@@ -850,10 +850,10 @@ function forecastDateWindow(query = {}) {
   const defaultWindow = forecastDateWindowWeeks(weekCount);
   const start = isoPattern.test(String(query.start || "")) ? String(query.start) : defaultWindow.start;
   let end = isoPattern.test(String(query.end || "")) ? String(query.end) : "";
-  if (!end || end <= start) {
-    end = localIsoDate(addDateDays(new Date(`${start}T00:00:00`), weekCount * 7));
+  if (!end || end < start) {
+    end = localIsoDate(addDateDays(new Date(`${start}T00:00:00`), weekCount * 7 - 1));
   }
-  const days = Math.max(1, Math.round((new Date(`${end}T00:00:00`) - new Date(`${start}T00:00:00`)) / (24 * 60 * 60 * 1000)));
+  const days = Math.max(1, Math.round((new Date(`${end}T00:00:00`) - new Date(`${start}T00:00:00`)) / (24 * 60 * 60 * 1000)) + 1);
   return {
     weeks: Math.max(1, Math.ceil(days / 7)),
     start,
@@ -882,7 +882,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
     JOIN ingredients i ON i.id = pf.ingredient_id
     WHERE pb.quantity > 0
       AND w.week_start >= @start
-      AND w.week_start < @end
+      AND w.week_start <= @end
     GROUP BY i.id, i.ingredient_type, COALESCE(pf.quantity_uom, 'grams')
     HAVING required_qty > 0
     ORDER BY i.name, quantity_uom
@@ -941,6 +941,19 @@ async function scheduledIngredientUsageForecast(query = {}) {
     const startingInventoryValue = currentInventoryValue == null
       ? null
       : Math.max(0, Number(currentInventoryValue || 0) - priorUsage);
+    const requiredQty = Number(row.required_qty || 0);
+    const projectedRemainingQty = startingInventoryValue == null
+      ? null
+      : startingInventoryValue - requiredQty;
+    const neededToOrderQty = projectedRemainingQty == null
+      ? null
+      : Math.max(0, -projectedRemainingQty);
+    const conversion = inventoryConversionForName(row.ingredient_name)
+      || inventoryConversionForName(inventory?.uploaded_name);
+    const unitsPerOrderUnit = rowUom === "each"
+      ? Number(conversion?.each_per_inventory_unit)
+      : Number(inventory?.grams_per_inventory_unit ?? conversion?.grams_per_inventory_unit);
+    const hasOrderConversion = Number.isFinite(unitsPerOrderUnit) && unitsPerOrderUnit > 0;
     return {
       ...row,
       quantity_uom: row.quantity_uom || inventory?.quantity_uom || "grams",
@@ -949,6 +962,12 @@ async function scheduledIngredientUsageForecast(query = {}) {
       current_inventory_value: currentInventoryValue,
       prior_usage_qty: priorUsage,
       starting_inventory_value: startingInventoryValue,
+      projected_remaining_qty: projectedRemainingQty,
+      needed_to_order_qty: neededToOrderQty,
+      order_units_needed: neededToOrderQty == null || !hasOrderConversion
+        ? null
+        : Math.ceil(neededToOrderQty / unitsPerOrderUnit),
+      order_unit_uom: conversion?.inventory_uom || inventory?.inventory_uom || "",
       current_inventory_uom: isEach ? "each" : "grams",
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
       inventory_source_uom: inventory?.inventory_uom || "",
@@ -999,7 +1018,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
     JOIN ingredients i ON i.id = pf.ingredient_id
     WHERE pb.quantity > 0
       AND w.week_start >= @start
-      AND w.week_start < @end
+      AND w.week_start <= @end
     ORDER BY w.week_start, i.name, p.name
   `, { start, end });
   return {
@@ -1023,8 +1042,15 @@ function forecastInventoryValue(row) {
 }
 
 function forecastRemainingValue(row) {
+  if (row.projected_remaining_qty != null) return Number(row.projected_remaining_qty);
   const inventory = forecastInventoryValue(row);
   return inventory == null ? null : inventory - Number(row.required_qty || 0);
+}
+
+function forecastNeededToOrderValue(row) {
+  if (row.needed_to_order_qty != null) return Number(row.needed_to_order_qty);
+  const remaining = forecastRemainingValue(row);
+  return remaining == null ? null : Math.max(0, -remaining);
 }
 
 function formatReportQty(value) {
@@ -1098,26 +1124,32 @@ function streamForecastPdf(res, report, rows, query = {}) {
 
   const totals = rows.reduce((map, row) => {
     const uom = row.quantity_uom || "units";
-    map.set(uom, (map.get(uom) || 0) + Number(row.required_qty || 0));
+    const current = map.get(uom) || { usage: 0, order: 0 };
+    current.usage += Number(row.required_qty || 0);
+    current.order += Number(forecastNeededToOrderValue(row) || 0);
+    map.set(uom, current);
     return map;
   }, new Map());
   if (totals.size) {
-    doc.font("Helvetica-Bold").fontSize(10).fillColor("#172026").text("Scheduled Usage Totals");
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#172026").text("Date Range Totals");
     doc.font("Helvetica").fontSize(9).fillColor("#172026")
-      .text([...totals.entries()].map(([uom, value]) => `${formatReportQty(value)} ${uom}`).join("   "));
+      .text([...totals.entries()].map(([uom, values]) => (
+        `${formatReportQty(values.usage)} ${uom} usage | ${formatReportQty(values.order)} ${uom} to order`
+      )).join("   "));
     doc.moveDown(0.75);
   }
 
   const columns = [
-    { label: "Ingredient", width: 150 },
-    { label: "Type", width: 42 },
-    { label: "Scheduled", width: 62, align: "right" },
-    { label: "Inventory Start", width: 62, align: "right" },
-    { label: "Remaining", width: 62, align: "right" },
-    { label: "UOM", width: 42 },
-    { label: "Batches", width: 45, align: "right" },
-    { label: "Products", width: 170 },
-    { label: "First Week", width: 62 },
+    { label: "Ingredient", width: 126 },
+    { label: "Type", width: 38 },
+    { label: "Range Usage", width: 54, align: "right" },
+    { label: "Inventory Start", width: 58, align: "right" },
+    { label: "Remaining", width: 54, align: "right" },
+    { label: "Need to Order", width: 58, align: "right" },
+    { label: "Order Units", width: 74 },
+    { label: "UOM", width: 40 },
+    { label: "Batches", width: 42, align: "right" },
+    { label: "Products", width: 148 },
   ];
   writePdfTableRow(doc, columns, columns.map((column) => column.label), {
     bold: true,
@@ -1133,10 +1165,11 @@ function streamForecastPdf(res, report, rows, query = {}) {
       formatReportQty(row.required_qty),
       formatReportQty(forecastInventoryValue(row)),
       formatReportQty(remaining),
+      formatReportQty(forecastNeededToOrderValue(row)),
+      row.order_units_needed == null ? "" : `${formatReportQty(row.order_units_needed)} ${row.order_unit_uom || "units"}`,
       row.quantity_uom,
       row.scheduled_batches || 0,
       row.products || "",
-      row.first_week || "",
     ], {
       color: remaining < 0 ? "#b42318" : "#172026",
       fill: remaining < 0 ? "#fde8e8" : "",
@@ -1737,10 +1770,11 @@ app.get("/api/formulas", async (req, res) => {
   try {
     ok(res, {
       products: await all(`
-        SELECT id, name, sku, category, active
-        FROM products
-        WHERE active = 1 AND category IN ('Hijnx', 'Snackbar')
-        ORDER BY category, name
+        SELECT p.id, p.name, p.sku, p.category, p.active, pbs.batch_size
+        FROM products p
+        LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
+        WHERE p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
+        ORDER BY p.category, p.name
       `),
       formulas: await all(`
         SELECT pf.id, pf.product_id, pf.ingredient_id, pf.quantity_per_unit, pf.quantity_uom, pf.notes,

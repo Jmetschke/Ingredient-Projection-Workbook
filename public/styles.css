@@ -746,7 +746,7 @@ tr.warning td {
 }
 
 #forecast-table table {
-  min-width: 0;
+  min-width: 1380px;
   table-layout: fixed;
   width: 100%;
 }
@@ -760,41 +760,59 @@ tr.warning td {
 
 #forecast-table th:nth-child(1),
 #forecast-table td:nth-child(1) {
-  width: 20%;
+  width: 190px;
 }
 
 #forecast-table th:nth-child(2),
 #forecast-table td:nth-child(2) {
-  width: 8%;
+  width: 90px;
 }
 
 #forecast-table th:nth-child(3),
 #forecast-table td:nth-child(3) {
-  width: 11%;
+  width: 125px;
 }
 
 #forecast-table th:nth-child(4),
 #forecast-table td:nth-child(4) {
-  width: 12%;
+  width: 120px;
 }
 
 #forecast-table th:nth-child(5),
-#forecast-table td:nth-child(5),
+#forecast-table td:nth-child(5) {
+  width: 105px;
+}
+
 #forecast-table th:nth-child(6),
 #forecast-table td:nth-child(6) {
-  width: 7%;
+  width: 120px;
 }
 
 #forecast-table th:nth-child(7),
 #forecast-table td:nth-child(7) {
-  width: 15%;
+  width: 150px;
 }
 
 #forecast-table th:nth-child(8),
-#forecast-table td:nth-child(8),
+#forecast-table td:nth-child(8) {
+  width: 85px;
+}
+
 #forecast-table th:nth-child(9),
 #forecast-table td:nth-child(9) {
-  width: 10%;
+  width: 80px;
+}
+
+#forecast-table th:nth-child(10),
+#forecast-table td:nth-child(10) {
+  width: 210px;
+}
+
+#forecast-table th:nth-child(11),
+#forecast-table td:nth-child(11),
+#forecast-table th:nth-child(12),
+#forecast-table td:nth-child(12) {
+  width: 100px;
 }
 
 #forecast-table td:first-child,
@@ -804,6 +822,43 @@ tr.warning td {
 
 #forecast-table .numeric {
   white-space: nowrap;
+}
+
+.forecast-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.forecast-summary-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+}
+
+.forecast-summary-card span,
+.forecast-summary-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.forecast-summary-card.warning-card {
+  background: var(--danger-bg);
+  border-color: #e2a39d;
+}
+
+.shortage-text {
+  color: var(--danger) !important;
+  font-weight: 700;
+}
+
+td.order-needed {
+  font-weight: 800;
 }
 
 .unmatched-panel {
@@ -1197,6 +1252,21 @@ tr.warning td {
   margin: 0 0 8px;
 }
 
+.formula-batch-size-form {
+  align-items: end;
+  background: #eef5f4;
+  border: 1px solid #b9d1cd;
+  border-radius: 8px;
+  grid-template-columns: minmax(150px, 210px) minmax(140px, auto) minmax(220px, 1fr);
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.formula-batch-size-form .source-note {
+  align-self: center;
+  margin: 0;
+}
+
 .bom-form {
   grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) minmax(90px, 110px) minmax(120px, auto);
 }
@@ -1259,6 +1329,7 @@ pre {
   .forecast-tools,
   .velocity-tools,
   .velocity-size-form,
+  .formula-batch-size-form,
   .formula-product-form,
   .velocity-schedule-form {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -1320,7 +1391,7 @@ pre {
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .formula-product-form, .production-week-add-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .formula-batch-size-form, .formula-product-form, .production-week-add-form {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -1335,6 +1406,7 @@ pre {
   .velocity-schedule-form button,
   .bom-form button,
   .bom-copy-form button,
+  .formula-batch-size-form button,
   .formula-product-form button,
   .inventory-add-form button {
     width: 100%;
