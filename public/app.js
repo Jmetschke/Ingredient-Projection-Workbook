@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260715-location-navigation-v14";
+const APP_VERSION = "20260715-bom-transfer-v15";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -1891,6 +1891,9 @@ async function refreshFormulaManager() {
   updateFormulaUomDisplay();
 
   const selectedFormulas = data.formulas.filter((formula) => String(formula.product_id) === String(state.selectedFormulaProductId));
+  const exportButton = document.querySelector("#formula-export-bom");
+  exportButton.dataset.productId = selectedProduct?.id || "";
+  exportButton.disabled = !selectedProduct || !selectedFormulas.length || !(Number(selectedProduct.batch_size) > 0);
   updateFormulaCopyForm(batches, data.formulas, selectedFormulas);
   renderFormulaEditor(selectedFormulas);
 }
@@ -2104,6 +2107,54 @@ document.querySelector("#velocity-size-form").addEventListener("submit", async (
 });
 
 document.querySelector("#formula-form select[name='ingredient_id']").addEventListener("change", updateFormulaUomDisplay);
+
+document.querySelector("#formula-export-bom").addEventListener("click", (event) => {
+  const productId = event.currentTarget.dataset.productId;
+  if (!productId) return;
+  window.location.href = `/api/formulas/export/${productId}`;
+});
+
+document.querySelector("#formula-import-bom").addEventListener("change", async (event) => {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const preview = JSON.parse(await file.text());
+    const productName = String(preview?.bom?.product?.name || "").trim();
+    if (preview?.format !== "ingredient-projection-bom" || Number(preview?.version) !== 1 || !productName) {
+      throw new Error("Select a valid Ingredient Projection BOM transfer file.");
+    }
+    if (!confirm(`Import ${productName}? If this production batch already exists, its current BOM will be replaced.`)) {
+      input.value = "";
+      return;
+    }
+    setMessage("#formula-transfer-message", `Importing ${productName}...`);
+    const response = await fetch("/api/formulas/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: await file.arrayBuffer(),
+    });
+    const payload = await response.json();
+    if (!payload.ok) throw new Error(payload.error);
+    const imported = payload.data;
+    state.selectedFormulaProductId = String(imported.product_id);
+    input.value = "";
+    await loadReference();
+    await refreshFormulaManager();
+    const createdSummary = [
+      imported.created_product ? "created the production batch" : "updated the production batch",
+      imported.created_ingredients ? `created ${imported.created_ingredients} missing ingredient${imported.created_ingredients === 1 ? "" : "s"}` : "matched all ingredients",
+    ].join(" and ");
+    setMessage(
+      "#formula-transfer-message",
+      `Imported ${imported.product_name}: ${imported.imported_ingredients} BOM ingredients, Batch QTY ${qty(imported.batch_size)}; ${createdSummary}.`,
+      "success",
+    );
+  } catch (error) {
+    input.value = "";
+    setMessage("#formula-transfer-message", error.message, "error");
+  }
+});
 
 document.querySelector("#formula-batch-size-form").addEventListener("submit", async (event) => {
   event.preventDefault();

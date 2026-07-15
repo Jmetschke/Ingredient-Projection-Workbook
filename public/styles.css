@@ -1324,6 +1324,46 @@ td.order-needed {
   padding-bottom: 12px;
 }
 
+.bom-transfer-panel {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.bom-transfer-panel h3,
+.bom-transfer-panel p {
+  margin: 0;
+}
+
+.bom-transfer-panel h3 {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.bom-transfer-panel p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bom-transfer-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(180px, 240px));
+}
+
+.bom-transfer-actions .file-action {
+  align-self: stretch;
+}
+
+.bom-transfer-panel .form-message,
+.bom-transfer-panel .source-note {
+  margin: 0;
+}
+
 .bom-copy-panel h3 {
   font-size: 14px;
   margin: 0 0 8px;
@@ -1511,6 +1551,10 @@ pre {
 
   .batch-list {
     max-height: 320px;
+  }
+
+  .bom-transfer-actions {
+    grid-template-columns: 1fr;
   }
 
   .kpis {

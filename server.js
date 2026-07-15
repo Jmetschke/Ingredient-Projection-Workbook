@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import PDFDocument from "pdfkit";
 import XLSX from "xlsx";
-import { all, one, run } from "./src/db.js";
+import { all, one, run, withTransaction } from "./src/db.js";
 import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-calendar-db.js";
 import { BATCH_TYPES, PRODUCT_ALIASES, VELOCITY_BATCH_UNIT_MULTIPLIERS } from "./src/master-products.js";
 import { bomUomForIngredient } from "./src/master-ingredients.js";
@@ -1766,6 +1766,69 @@ app.post("/api/velocity/import", express.raw({ type: ["application/pdf", "applic
   }
 });
 
+const BOM_TRANSFER_FORMAT = "ingredient-projection-bom";
+const BOM_TRANSFER_VERSION = 1;
+
+function bomTransferText(value, label, maxLength = 200, required = true) {
+  const text = String(value ?? "").trim();
+  if (required && !text) throw new Error(`${label} is required`);
+  if (text.length > maxLength) throw new Error(`${label} is too long`);
+  return text;
+}
+
+function parseBomTransferFile(buffer) {
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(buffer || "").toString("utf8"));
+  } catch {
+    throw new Error("The selected file is not valid BOM JSON");
+  }
+  if (payload?.format !== BOM_TRANSFER_FORMAT || Number(payload?.version) !== BOM_TRANSFER_VERSION) {
+    throw new Error("This is not a supported Ingredient Projection BOM transfer file");
+  }
+  const sourceProduct = payload?.bom?.product;
+  const name = bomTransferText(sourceProduct?.name, "Production batch name");
+  const category = bomTransferText(sourceProduct?.category, "Batch type", 50);
+  if (!BATCH_TYPES.includes(category)) throw new Error("BOM batch type must be Hijnx or Snackbar");
+  const sku = bomTransferText(sourceProduct?.sku, "SKU", 200, false) || null;
+  const batchSize = Number(sourceProduct?.batch_size);
+  if (!Number.isFinite(batchSize) || batchSize <= 0) {
+    throw new Error("BOM Batch QTY must be greater than zero");
+  }
+  const sourceIngredients = payload?.bom?.ingredients;
+  if (!Array.isArray(sourceIngredients) || !sourceIngredients.length) {
+    throw new Error("The BOM transfer file does not contain any ingredients");
+  }
+  if (sourceIngredients.length > 1000) throw new Error("The BOM transfer file contains too many ingredients");
+  const ingredientNames = new Set();
+  const ingredients = sourceIngredients.map((sourceIngredient, index) => {
+    const ingredientName = bomTransferText(sourceIngredient?.name, `Ingredient ${index + 1} name`);
+    const ingredientKey = ingredientName.toLowerCase();
+    if (ingredientNames.has(ingredientKey)) throw new Error(`Duplicate ingredient in transfer file: ${ingredientName}`);
+    ingredientNames.add(ingredientKey);
+    const quantityPerUnit = Number(sourceIngredient?.quantity_per_unit);
+    if (!Number.isFinite(quantityPerUnit) || quantityPerUnit <= 0) {
+      throw new Error(`Quantity for ${ingredientName} must be greater than zero`);
+    }
+    const purchaseUom = normalizeIngredientUom(
+      sourceIngredient?.purchase_uom || sourceIngredient?.quantity_uom,
+      ingredientName,
+    );
+    return {
+      name: ingredientName,
+      purchase_uom: purchaseUom,
+      ingredient_type: normalizeIngredientType(sourceIngredient?.ingredient_type),
+      quantity_per_unit: quantityPerUnit,
+      quantity_uom: purchaseUom,
+      notes: bomTransferText(sourceIngredient?.notes, `${ingredientName} notes`, 1000, false) || null,
+    };
+  });
+  return {
+    product: { name, category, sku, batch_size: batchSize },
+    ingredients,
+  };
+}
+
 app.get("/api/formulas", async (req, res) => {
   try {
     ok(res, {
@@ -1788,6 +1851,144 @@ app.get("/api/formulas", async (req, res) => {
     });
   } catch (error) {
     fail(res, error);
+  }
+});
+
+app.get("/api/formulas/export/:productId", async (req, res) => {
+  try {
+    const product = await one(`
+      SELECT p.id, p.name, p.sku, p.category, pbs.batch_size
+      FROM products p
+      LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
+      WHERE p.id = ? AND p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
+    `, [req.params.productId]);
+    if (!product) return fail(res, new Error("Production batch not found"), 404);
+    if (!(Number(product.batch_size) > 0)) {
+      return fail(res, new Error("Set a Batch QTY before exporting this BOM"), 400);
+    }
+    const ingredients = await all(`
+      SELECT i.name,
+             i.purchase_uom,
+             i.ingredient_type,
+             pf.quantity_per_unit,
+             pf.quantity_uom,
+             pf.notes
+      FROM product_formulas pf
+      JOIN ingredients i ON i.id = pf.ingredient_id
+      WHERE pf.product_id = ? AND pf.source_sheet IS NULL
+      ORDER BY i.name
+    `, [product.id]);
+    if (!ingredients.length) return fail(res, new Error("This production batch does not have a BOM to export"), 400);
+    const transfer = {
+      format: BOM_TRANSFER_FORMAT,
+      version: BOM_TRANSFER_VERSION,
+      exported_at: new Date().toISOString(),
+      source: process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get("host")}`,
+      bom: {
+        product: {
+          name: product.name,
+          sku: product.sku || null,
+          category: product.category,
+          batch_size: Number(product.batch_size),
+        },
+        ingredients: ingredients.map((ingredient) => ({
+          name: ingredient.name,
+          purchase_uom: normalizeIngredientUom(ingredient.purchase_uom, ingredient.name),
+          ingredient_type: normalizeIngredientType(ingredient.ingredient_type),
+          quantity_per_unit: Number(ingredient.quantity_per_unit),
+          quantity_uom: normalizeIngredientUom(ingredient.quantity_uom, ingredient.name),
+          notes: ingredient.notes || null,
+        })),
+      },
+    };
+    const filename = `${product.name}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "formula";
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}.bom.json"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.send(`${JSON.stringify(transfer, null, 2)}\n`);
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/formulas/import", express.raw({ type: "application/octet-stream", limit: "2mb" }), async (req, res) => {
+  try {
+    const transfer = parseBomTransferFile(req.body);
+    const result = await withTransaction(async (tx) => {
+      let product = await tx.one("SELECT id, name FROM products WHERE lower(name) = lower(?)", [transfer.product.name]);
+      const createdProduct = !product;
+      if (product) {
+        await tx.run(
+          "UPDATE products SET sku = ?, category = ?, active = 1 WHERE id = ?",
+          [transfer.product.sku, transfer.product.category, product.id],
+        );
+      } else {
+        const inserted = await tx.run(
+          "INSERT INTO products (name, sku, category, active) VALUES (?, ?, ?, 1)",
+          [transfer.product.name, transfer.product.sku, transfer.product.category],
+        );
+        product = { id: inserted.lastInsertRowid, name: transfer.product.name };
+      }
+      await tx.run(
+        `INSERT INTO product_batch_sizes (product_id, batch_size, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(product_id) DO UPDATE SET
+           batch_size = excluded.batch_size,
+           updated_at = CURRENT_TIMESTAMP`,
+        [product.id, transfer.product.batch_size],
+      );
+      const existingFormulaCount = Number((await tx.one(
+        "SELECT COUNT(*) AS count FROM product_formulas WHERE product_id = ? AND source_sheet IS NULL",
+        [product.id],
+      ))?.count || 0);
+      const ingredientIds = [];
+      let createdIngredients = 0;
+      for (const ingredient of transfer.ingredients) {
+        let targetIngredient = await tx.one("SELECT id FROM ingredients WHERE lower(name) = lower(?)", [ingredient.name]);
+        if (targetIngredient) {
+          await tx.run(
+            `UPDATE ingredients
+             SET purchase_uom = ?, ingredient_type = ?, is_master = 1, active = 1
+             WHERE id = ?`,
+            [ingredient.purchase_uom, ingredient.ingredient_type, targetIngredient.id],
+          );
+        } else {
+          const inserted = await tx.run(
+            `INSERT INTO ingredients
+              (name, purchase_uom, ingredient_type, is_master, active)
+             VALUES (?, ?, ?, 1, 1)`,
+            [ingredient.name, ingredient.purchase_uom, ingredient.ingredient_type],
+          );
+          targetIngredient = { id: inserted.lastInsertRowid };
+          createdIngredients += 1;
+        }
+        ingredientIds.push({ ...ingredient, id: targetIngredient.id });
+      }
+      await tx.run("DELETE FROM product_formulas WHERE product_id = ? AND source_sheet IS NULL", [product.id]);
+      for (const ingredient of ingredientIds) {
+        await tx.run(
+          `INSERT INTO product_formulas
+            (product_id, ingredient_id, quantity_per_unit, quantity_uom, notes)
+           VALUES (?, ?, ?, ?, ?)`,
+          [product.id, ingredient.id, ingredient.quantity_per_unit, ingredient.quantity_uom, ingredient.notes],
+        );
+      }
+      return {
+        product_id: Number(product.id),
+        product_name: transfer.product.name,
+        created_product: createdProduct,
+        batch_size: transfer.product.batch_size,
+        imported_ingredients: ingredientIds.length,
+        created_ingredients: createdIngredients,
+        replaced_ingredients: existingFormulaCount,
+      };
+    });
+    ok(res, result);
+  } catch (error) {
+    fail(res, error, 400);
   }
 });
 

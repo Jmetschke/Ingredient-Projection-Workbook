@@ -395,6 +395,21 @@
               <button type="submit">Save Batch QTY</button>
               <span class="source-note">Used as the standard quantity when scheduling this production batch.</span>
             </form>
+            <div class="bom-transfer-panel">
+              <div>
+                <h3>Transfer BOM Between Services</h3>
+                <p>Export the selected BOM here, then import the downloaded file in the other service.</p>
+              </div>
+              <div class="bom-transfer-actions">
+                <button id="formula-export-bom" type="button">Export Selected BOM</button>
+                <label class="file-action">
+                  <span>Import BOM File</span>
+                  <input id="formula-import-bom" type="file" accept="application/json,.json">
+                </label>
+              </div>
+              <div class="source-note warning">Import matches the production batch and ingredients by name. It replaces the matching batch's existing BOM and transfers its Batch QTY.</div>
+              <div id="formula-transfer-message" class="form-message"></div>
+            </div>
             <div class="bom-copy-panel">
               <h3>Copy Existing BOM</h3>
               <form id="formula-copy-form" class="inline-form bom-copy-form">
@@ -455,6 +470,6 @@
 
     </main>
 
-    <script src="/app.js?v=20260715-location-navigation-v14"></script>
+    <script src="/app.js?v=20260715-bom-transfer-v15"></script>
   </body>
 </html>

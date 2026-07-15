@@ -94,6 +94,33 @@ export async function run(sql, params = {}) {
   };
 }
 
+export async function withTransaction(callback) {
+  const transaction = await db.transaction("write");
+  const transactionExecute = async (sql, params = {}) => transaction.execute({
+    sql: normalizeSql(sql, params),
+    args: normalizeParams(params),
+  });
+  const helpers = {
+    all: async (sql, params = {}) => normalizeRows(await transactionExecute(sql, params)),
+    one: async (sql, params = {}) => normalizeRows(await transactionExecute(sql, params))[0],
+    run: async (sql, params = {}) => {
+      const result = await transactionExecute(sql, params);
+      return {
+        changes: result.rowsAffected,
+        lastInsertRowid: result.lastInsertRowid ? Number(result.lastInsertRowid) : undefined,
+      };
+    },
+  };
+  try {
+    const result = await callback(helpers);
+    await transaction.commit();
+    return result;
+  } catch (error) {
+    await transaction.rollback().catch(() => null);
+    throw error;
+  }
+}
+
 export async function execStatements(statements) {
   for (const statement of statements) {
     await run(statement.sql, statement.args || {});

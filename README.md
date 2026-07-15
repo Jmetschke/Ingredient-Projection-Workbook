@@ -32,6 +32,47 @@ DATABASE_PATH=./data/planning.db
 
 The schema is created automatically on startup. Production schedules, BOMs, and ingredient projections are driven by app data entered through the planner, formula manager, and inventory screens.
 
+## Transferring a BOM between services
+
+Each Render service can export the selected Formula Manager BOM as a versioned `.bom.json` file. Import that file from the Formula Manager in the other service. Database IDs are never transferred; production batches and ingredients are matched case-insensitively by name.
+
+Import behavior:
+
+- creates the production batch if it is missing;
+- transfers the product category and Batch QTY;
+- creates missing master ingredients and transfers their BOM UOM/type;
+- replaces only the imported production batch's existing BOM;
+- leaves schedules, inventory quantities, costs, and unrelated BOMs unchanged.
+
+Transfer files use this structure:
+
+```json
+{
+  "format": "ingredient-projection-bom",
+  "version": 1,
+  "exported_at": "2026-07-15T12:00:00.000Z",
+  "source": "https://ingredient-projection-workbook.onrender.com",
+  "bom": {
+    "product": {
+      "name": "Alpha Chunk - 1pk",
+      "sku": null,
+      "category": "Hijnx",
+      "batch_size": 7500
+    },
+    "ingredients": [
+      {
+        "name": "Green Apple Pucks",
+        "purchase_uom": "grams",
+        "ingredient_type": "Hijnx",
+        "quantity_per_unit": 250,
+        "quantity_uom": "grams",
+        "notes": null
+      }
+    ]
+  }
+}
+```
+
 ## Health check
 
 Use `/api/health` for a Render health check.
