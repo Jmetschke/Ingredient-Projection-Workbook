@@ -26,9 +26,86 @@ body {
   background: var(--bg);
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 100vh;
   max-width: 100%;
   overflow-x: clip;
+}
+
+.suite-navigation {
+  align-items: center;
+  background: #152126;
+  border-bottom: 1px solid #3a4b51;
+  display: grid;
+  gap: 14px;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 10px 16px;
+}
+
+.suite-location-toggle {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.suite-location-toggle > span {
+  color: #aebdc1;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-right: 2px;
+  text-transform: uppercase;
+}
+
+button.suite-location-button {
+  background: transparent;
+  border-color: #60737a;
+  color: #dce6e8;
+  min-height: 34px;
+  min-width: 46px;
+  padding: 6px 10px;
+}
+
+button.suite-location-button.active,
+button.suite-location-button:hover {
+  background: #dcebe8;
+  border-color: #dcebe8;
+  color: #174d46;
+}
+
+.suite-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.suite-links[hidden] {
+  display: none;
+}
+
+.suite-links a {
+  align-items: center;
+  background: #26363c;
+  border: 1px solid #4b6067;
+  border-radius: 6px;
+  color: #edf5f6;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 7px 10px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.suite-links a:hover,
+.suite-links a:focus-visible {
+  background: #314c4c;
+  border-color: #8bb7ae;
+  outline: none;
 }
 
 .sidebar {
@@ -1345,6 +1422,22 @@ pre {
 
   body {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .suite-navigation {
+    gap: 8px;
+    grid-column: 1;
+    grid-template-columns: 1fr;
+    padding: 9px 12px;
+  }
+
+  .suite-links {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
   }
 
   .sidebar {

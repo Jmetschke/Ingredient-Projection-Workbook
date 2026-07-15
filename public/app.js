@@ -27,8 +27,35 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260714-formula-batch-qty-v13";
+const APP_VERSION = "20260715-location-navigation-v14";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
+
+function setSuiteLocation(location) {
+  const selectedLocation = location === "NY" ? "NY" : "IL";
+  document.querySelectorAll("[data-suite-location]").forEach((button) => {
+    const isSelected = button.dataset.suiteLocation === selectedLocation;
+    button.classList.toggle("active", isSelected);
+    button.setAttribute("aria-selected", String(isSelected));
+  });
+  document.querySelectorAll("[data-suite-links]").forEach((links) => {
+    links.hidden = links.dataset.suiteLinks !== selectedLocation;
+  });
+  try {
+    window.localStorage.setItem(SUITE_LOCATION_STORAGE_KEY, selectedLocation);
+  } catch {
+    // Location persistence is optional when storage is unavailable.
+  }
+}
+
+document.querySelectorAll("[data-suite-location]").forEach((button) => {
+  button.addEventListener("click", () => setSuiteLocation(button.dataset.suiteLocation));
+});
+try {
+  setSuiteLocation(window.localStorage.getItem(SUITE_LOCATION_STORAGE_KEY) || "IL");
+} catch {
+  setSuiteLocation("IL");
+}
 
 const titles = {
   dashboard: ["Dashboard", "Inventory warnings, upcoming production, and purchase timing."],

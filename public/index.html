@@ -16,6 +16,26 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
+    <header class="suite-navigation" aria-label="Operations application navigation">
+      <div class="suite-location-toggle" role="tablist" aria-label="Select location">
+        <span>Location</span>
+        <button class="suite-location-button active" type="button" role="tab" aria-selected="true" aria-controls="suite-links-il" data-suite-location="IL">IL</button>
+        <button class="suite-location-button" type="button" role="tab" aria-selected="false" aria-controls="suite-links-ny" data-suite-location="NY">NY</button>
+      </div>
+      <div class="suite-links" id="suite-links-il" role="tabpanel" data-suite-links="IL">
+        <a href="https://manufacturing-tracker.onrender.com/" target="_blank" rel="noopener noreferrer">Production Tracker IL</a>
+        <a href="https://velocity-tracker-zc5x.onrender.com/" target="_blank" rel="noopener noreferrer">Velocity Tracker IL</a>
+        <a href="https://recipe-workbook.onrender.com/" target="_blank" rel="noopener noreferrer">Recipe Tracker IL</a>
+        <a href="https://ingredient-projection-workbook.onrender.com/" target="_blank" rel="noopener noreferrer">Ingredient Tracker IL</a>
+      </div>
+      <div class="suite-links" id="suite-links-ny" role="tabpanel" data-suite-links="NY" hidden>
+        <a href="https://manufacturing-tracker-ny.onrender.com/" target="_blank" rel="noopener noreferrer">Production Tracker NY</a>
+        <a href="https://ingredient-projection-workbook-ny.onrender.com/" target="_blank" rel="noopener noreferrer">Ingredient Tracker NY</a>
+        <a href="https://velocity-tracker-ny.onrender.com/" target="_blank" rel="noopener noreferrer">Velocity Tracker NY</a>
+        <a href="https://recipe-workbook-ny.onrender.com/" target="_blank" rel="noopener noreferrer">Recipe Tracker NY</a>
+      </div>
+    </header>
+
     <aside class="sidebar">
       <div class="brand">Production Planning</div>
       <nav id="tabs">
@@ -435,6 +455,6 @@
 
     </main>
 
-    <script src="/app.js?v=20260714-formula-batch-qty-v13"></script>
+    <script src="/app.js?v=20260715-location-navigation-v14"></script>
   </body>
 </html>
