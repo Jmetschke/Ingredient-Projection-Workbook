@@ -32,6 +32,10 @@ DATABASE_PATH=./data/planning.db
 
 The schema is created automatically on startup. Production schedules, BOMs, and ingredient projections are driven by app data entered through the planner, formula manager, and inventory screens.
 
+## Manual inventory audit entries
+
+The Ingredient Forecast tab includes a manual inventory form with mutually exclusive **Add to Current QTY** and **Update / Override QTY** fields. Add increases the ingredient's current balance. Update replaces the existing balance, including uploaded inventory data for that ingredient, and the result becomes the beginning quantity used by future forecast deductions. Every manual entry records its previous and resulting quantities in `manual_inventory_adjustments`.
+
 ## Transferring a BOM between services
 
 Each Render service can export the selected Formula Manager BOM as a versioned `.bom.json` file. Import that file from the Formula Manager in the other service. Database IDs are never transferred; production batches and ingredients are matched case-insensitively by name.

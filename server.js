@@ -1598,6 +1598,142 @@ app.get("/api/inventory-upload", async (req, res) => {
   }
 });
 
+app.get("/api/inventory-adjustments", async (req, res) => {
+  try {
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(100, Math.max(1, Math.round(requestedLimit))) : 25;
+    ok(res, {
+      rows: await all(`
+        SELECT id,
+               ingredient_id,
+               ingredient_name,
+               adjustment_type,
+               entered_qty,
+               previous_qty,
+               resulting_qty,
+               quantity_uom,
+               created_at
+        FROM manual_inventory_adjustments
+        ORDER BY id DESC
+        LIMIT ?
+      `, [limit]),
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/inventory-adjustments", async (req, res) => {
+  try {
+    const ingredientId = Number(req.body.ingredient_id);
+    const hasAdd = req.body.add_qty !== undefined && String(req.body.add_qty).trim() !== "";
+    const hasUpdate = req.body.update_qty !== undefined && String(req.body.update_qty).trim() !== "";
+    if (hasAdd === hasUpdate) {
+      return fail(res, new Error("Enter either an Add quantity or an Update quantity, but not both"), 400);
+    }
+    const enteredQty = Number(hasAdd ? req.body.add_qty : req.body.update_qty);
+    if (!Number.isFinite(enteredQty) || (hasAdd ? enteredQty <= 0 : enteredQty < 0)) {
+      return fail(res, new Error(hasAdd
+        ? "Add quantity must be greater than zero"
+        : "Update quantity must be zero or greater"), 400);
+    }
+    const result = await withTransaction(async (tx) => {
+      const rawIngredient = await tx.one(
+        "SELECT id, name, purchase_uom, ingredient_type FROM ingredients WHERE id = ? AND is_master = 1 AND active = 1",
+        [ingredientId],
+      );
+      if (!rawIngredient) throw new Error("Select a valid master ingredient");
+      const ingredient = withBomUom(rawIngredient);
+      const quantityUom = ingredient.bom_uom || "grams";
+      const inventoryConversion = inventoryConversionForName(ingredient.name);
+      const storedInventoryUom = quantityUom === "each" && Number(inventoryConversion?.each_per_inventory_unit) > 0
+        ? inventoryConversion.inventory_uom
+        : quantityUom;
+      const existingRows = await tx.all(`
+        SELECT uploaded_name,
+               current_qty,
+               quantity_uom,
+               inventory_uom,
+               grams_per_inventory_unit,
+               current_qty_grams,
+               ingredient_name
+        FROM latest_inventory_rows
+        WHERE ingredient_id = ?
+           OR (ingredient_id IS NULL AND lower(COALESCE(NULLIF(ingredient_name, ''), uploaded_name)) = lower(?))
+      `, [ingredient.id, ingredient.name]);
+      const previousQty = existingRows.reduce((sum, row) => {
+        const normalized = row.current_qty_grams == null
+          ? withInventoryConversion(row, ingredient.name)
+          : row;
+        const value = quantityUom === "each"
+          ? normalized.current_qty
+          : normalized.current_qty_grams ?? normalized.current_qty;
+        return sum + Number(value || 0);
+      }, 0);
+      const adjustmentType = hasAdd ? "add" : "update";
+      const resultingQty = hasAdd ? previousQty + enteredQty : enteredQty;
+      await tx.run(`
+        DELETE FROM latest_inventory_rows
+        WHERE ingredient_id = ?
+           OR (ingredient_id IS NULL AND lower(COALESCE(NULLIF(ingredient_name, ''), uploaded_name)) = lower(?))
+      `, [ingredient.id, ingredient.name]);
+      await tx.run(`
+        INSERT INTO latest_inventory_rows
+          (uploaded_name,
+           current_qty,
+           quantity_uom,
+           inventory_uom,
+           grams_per_inventory_unit,
+           current_qty_grams,
+           ingredient_id,
+           ingredient_name,
+           ingredient_type,
+           match_score,
+           match_method,
+           uploaded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+      `, [
+        ingredient.name,
+        resultingQty,
+        quantityUom,
+        storedInventoryUom,
+        quantityUom === "grams" ? 1 : null,
+        quantityUom === "grams" ? resultingQty : null,
+        ingredient.id,
+        ingredient.name,
+        ingredient.ingredient_type,
+        `manual_${adjustmentType}`,
+      ]);
+      const audit = await tx.run(`
+        INSERT INTO manual_inventory_adjustments
+          (ingredient_id, ingredient_name, adjustment_type, entered_qty, previous_qty, resulting_qty, quantity_uom)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [
+        ingredient.id,
+        ingredient.name,
+        adjustmentType,
+        enteredQty,
+        previousQty,
+        resultingQty,
+        quantityUom,
+      ]);
+      return {
+        id: audit.lastInsertRowid,
+        ingredient_id: ingredient.id,
+        ingredient_name: ingredient.name,
+        adjustment_type: adjustmentType,
+        entered_qty: enteredQty,
+        previous_qty: previousQty,
+        resulting_qty: resultingQty,
+        quantity_uom: quantityUom,
+      };
+    });
+    ok(res, result);
+  } catch (error) {
+    fail(res, error, 400);
+  }
+});
+
 app.post("/api/inventory-upload", express.raw({ type: ["application/pdf", "application/octet-stream"], limit: "20mb" }), async (req, res) => {
   try {
     const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");

@@ -812,6 +812,43 @@ tr.warning td {
   min-height: 18px;
 }
 
+.manual-inventory-panel {
+  background: #f8fbfa;
+  border: 1px solid #b9d1cd;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.manual-inventory-panel .section-head h3,
+.manual-inventory-panel .section-head span,
+.manual-inventory-panel h4 {
+  margin: 0;
+}
+
+.manual-inventory-panel .section-head h3 {
+  font-size: 16px;
+}
+
+.manual-inventory-panel .section-head span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.manual-inventory-form {
+  grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.8fr) minmax(170px, 0.9fr) minmax(90px, 0.5fr) minmax(170px, auto);
+}
+
+.manual-inventory-panel h4 {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.manual-inventory-panel .table-wrap {
+  max-height: 300px;
+}
+
 #forecast {
   overflow: visible;
 }
@@ -1446,6 +1483,7 @@ pre {
   .forecast-tools,
   .velocity-tools,
   .velocity-size-form,
+  .manual-inventory-form,
   .formula-batch-size-form,
   .formula-product-form,
   .velocity-schedule-form {

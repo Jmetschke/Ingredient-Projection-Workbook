@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260715-bom-transfer-v15";
+const APP_VERSION = "20260715-manual-inventory-v16";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -940,6 +940,53 @@ async function renderForecast() {
   const filterInput = document.querySelector("#forecast-filter");
   const typeSelect = document.querySelector("#forecast-ingredient-type");
   const uploadInput = document.querySelector("#forecast-inventory-upload");
+  const manualInventoryForm = document.querySelector("#manual-inventory-form");
+  const manualIngredientSelect = manualInventoryForm.querySelector("select[name='ingredient_id']");
+  const manualAddInput = manualInventoryForm.querySelector("input[name='add_qty']");
+  const manualUpdateInput = manualInventoryForm.querySelector("input[name='update_qty']");
+  const updateManualInventoryUom = () => {
+    document.querySelector("#manual-inventory-uom").value = manualIngredientSelect.selectedOptions[0]?.dataset.uom || "grams";
+  };
+  manualIngredientSelect.onchange = updateManualInventoryUom;
+  manualAddInput.oninput = () => {
+    if (manualAddInput.value !== "") manualUpdateInput.value = "";
+  };
+  manualUpdateInput.oninput = () => {
+    if (manualUpdateInput.value !== "") manualAddInput.value = "";
+  };
+  manualInventoryForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const addQty = manualAddInput.value;
+    const updateQty = manualUpdateInput.value;
+    if ((addQty === "") === (updateQty === "")) {
+      setMessage("#manual-inventory-message", "Enter either an Add quantity or an Update quantity, but not both.", "error");
+      return;
+    }
+    const ingredientName = manualIngredientSelect.selectedOptions[0]?.textContent || "ingredient";
+    const actionLabel = addQty !== "" ? "Adding to" : "Updating";
+    setMessage("#manual-inventory-message", `${actionLabel} ${ingredientName}...`);
+    try {
+      const adjustment = await api("/api/inventory-adjustments", {
+        method: "POST",
+        body: JSON.stringify({
+          ingredient_id: manualIngredientSelect.value,
+          add_qty: addQty,
+          update_qty: updateQty,
+        }),
+      });
+      manualAddInput.value = "";
+      manualUpdateInput.value = "";
+      await renderForecast();
+      setMessage(
+        "#manual-inventory-message",
+        `${adjustment.ingredient_name} updated from ${qty(adjustment.previous_qty)} to ${qty(adjustment.resulting_qty)} ${adjustment.quantity_uom}.`,
+        "success",
+      );
+    } catch (error) {
+      setMessage("#manual-inventory-message", error.message, "error");
+    }
+  };
+  updateManualInventoryUom();
   if (!state.forecastStart || !state.forecastEnd) {
     const start = parseIsoDate(nextProductionWeekStartIso());
     state.forecastStart = isoDate(start);
@@ -998,7 +1045,10 @@ async function renderForecast() {
       setMessage("#forecast-inventory-message", error.message, "error");
     }
   };
-  const data = await api(`/api/forecast${forecastReportQuery()}`);
+  const [data, manualAdjustments] = await Promise.all([
+    api(`/api/forecast${forecastReportQuery()}`),
+    api("/api/inventory-adjustments?limit=25"),
+  ]);
   const forecastWindow = document.querySelector("#forecast-window");
   state.forecastWeeks = data.filters.weeks || state.forecastWeeks;
   state.forecastStart = data.filters.start || state.forecastStart;
@@ -1016,7 +1066,35 @@ async function renderForecast() {
     .map((name) => `<option value="${escapeHtml(name)}"></option>`)
     .join("");
   renderForecastUnmatchedInventory();
+  renderManualInventoryHistory(manualAdjustments.rows || []);
   renderForecastTable(state.forecastRows);
+}
+
+function renderManualInventoryHistory(rows) {
+  const host = document.querySelector("#manual-inventory-history");
+  if (!rows.length) {
+    host.innerHTML = `<div class="empty small-empty">No manual inventory entries have been recorded.</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <h4>Recent Manual Entries</h4>
+    ${table([
+      { label: "Ingredient", key: "ingredient_name" },
+      { label: "Action", value: (row) => row.adjustment_type === "add" ? "Add" : "Update" },
+      { label: "Entered QTY", numeric: true, value: (row) => `${row.adjustment_type === "add" ? "+" : ""}${qty(row.entered_qty)}` },
+      { label: "Previous QTY", numeric: true, value: (row) => qty(row.previous_qty) },
+      { label: "Resulting QTY", numeric: true, value: (row) => qty(row.resulting_qty) },
+      { label: "UOM", key: "quantity_uom" },
+      {
+        label: "Recorded",
+        value: (row) => {
+          const timestamp = String(row.created_at || "").replace(" ", "T");
+          const date = timestamp ? new Date(`${timestamp}Z`) : null;
+          return date && !Number.isNaN(date.getTime()) ? escapeHtml(date.toLocaleString()) : escapeHtml(row.created_at || "");
+        },
+      },
+    ], rows)}
+  `;
 }
 
 function forecastFilteredRows(rows) {
