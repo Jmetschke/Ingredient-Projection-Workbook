@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260715-manual-inventory-v16";
+const APP_VERSION = "20260717-velocity-deficit-v17";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -1359,12 +1359,16 @@ function velocityProjection(product) {
   const projectedUnits = Number(imported?.projected_units || 0);
   const batchSize = Number(product.velocity_units_per_batch || product.batch_size || 0);
   const daysToOut = imported && velocity > 0 && projectedUnits >= 0 ? projectedUnits / velocity : null;
+  const totalUnitsNeeded = imported ? velocity * weeks * 7 : null;
+  const unitDeficit = imported ? Math.max(0, totalUnitsNeeded - projectedUnits) : null;
   return {
     projected_units: imported && Number.isFinite(projectedUnits) ? projectedUnits : null,
     velocity_per_day: imported ? velocity : null,
     days_to_out: daysToOut,
+    total_units_needed: totalUnitsNeeded,
+    unit_deficit: unitDeficit,
     velocity_units_per_batch: batchSize > 0 ? batchSize : null,
-    batches_needed: imported && batchSize > 0 ? (velocity * weeks * 7) / batchSize : null,
+    batches_needed: imported && batchSize > 0 ? unitDeficit / batchSize : null,
   };
 }
 
@@ -1418,7 +1422,7 @@ async function renderVelocity() {
     : `<ul>
         <li>Upload a Production Needs Report PDF.</li>
         <li>The importer reads SKU names, Projected units, and Vel/Day values, then matches them to active production batches.</li>
-        <li>Projected batch quantity is Vel/Day x projection weeks x 7.</li>
+        <li>Total units needed is Vel/Day x projection weeks x 7. The unit deficit subtracts projected units, and total batches rounds the deficit up to whole batches.</li>
       </ul>`;
   const sizeProductSelect = document.querySelector("#velocity-size-form select[name='product_id']");
   sizeProductSelect.innerHTML = state.velocityProducts
@@ -1439,6 +1443,8 @@ function renderVelocityTable(products) {
       projected_units: projection.projected_units,
       velocity_per_day: projection.velocity_per_day,
       days_to_out: projection.days_to_out,
+      total_units_needed: projection.total_units_needed,
+      unit_deficit: projection.unit_deficit,
       velocity_units_per_batch: projection.velocity_units_per_batch,
       batches_needed: projection.batches_needed,
       planned_batches: state.velocityPlannedBatches.get(String(product.id)) || 0,
@@ -1450,9 +1456,11 @@ function renderVelocityTable(products) {
     { label: "Projected Units", numeric: true, value: (row) => row.projected_units == null ? "" : qty(row.projected_units) },
     { label: "Vel / Day", numeric: true, value: (row) => row.velocity_per_day == null ? "" : qty(row.velocity_per_day) },
     { label: "Days To Out", numeric: true, value: (row) => row.days_to_out == null ? "" : qty(row.days_to_out) },
+    { label: "Total Units Needed", numeric: true, value: (row) => row.total_units_needed == null ? "" : qty(row.total_units_needed) },
+    { label: "Unit Deficit", numeric: true, value: (row) => row.unit_deficit == null ? "" : qty(row.unit_deficit) },
     { label: "Units / Batch", numeric: true, value: (row) => row.velocity_units_per_batch == null ? "" : qty(row.velocity_units_per_batch) },
     { label: "Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : qty(row.batches_needed) },
-    { label: "Whole Batches", numeric: true, value: (row) => row.batches_needed == null ? "" : Math.ceil(row.batches_needed) },
+    { label: "Total Batches Needed", numeric: true, value: (row) => row.batches_needed == null ? "" : Math.ceil(row.batches_needed) },
     { label: "Planned Batches", numeric: true, key: "planned_batches" },
     { label: "Actions", value: (row) => `<button class="small secondary velocity-use-schedule" type="button" data-product-id="${row.product_id}">Preview Schedule</button>` },
   ], filteredRows(rows, ["product_name", "batch_type"]));

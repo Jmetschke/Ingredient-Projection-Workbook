@@ -333,7 +333,10 @@ function rowsFromDistruInventoryPdf(buffer) {
   }
   const lineRows = [...grouped.values()].map((items) => {
     const sorted = items.sort((a, b) => a.x - b.x);
-    const uploadedName = cleanPdfCell(sorted.filter((item) => item.x < 220).map((item) => item.text).join(""));
+    // The item type column starts near x=219 in newer Distru exports. Keeping
+    // the name boundary clear of it prevents the leading "E" in "EO-..."
+    // item codes from being appended to names such as Bittermod and Monkfruit.
+    const uploadedName = cleanPdfCell(sorted.filter((item) => item.x < 210).map((item) => item.text).join(""));
     // Distru includes finished-good/METRC rows when "Exclude METRC items" is off.
     // Those rows are identified by the Brand column; ingredient/package rows leave it blank.
     const brand = cleanPdfCell(sorted.filter((item) => item.x >= 340 && item.x < 405).map((item) => item.text).join(""));
