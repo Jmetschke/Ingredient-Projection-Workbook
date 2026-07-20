@@ -660,6 +660,12 @@ tr.warning td {
   background: #edf7f5;
 }
 
+.week-card.drag-target {
+  background: #e3f3ef;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 .week-card.read-only {
   background: #f7faf9;
 }
@@ -694,6 +700,18 @@ tr.warning td {
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.batch-chip[draggable="true"] {
+  cursor: grab;
+}
+
+.batch-chip[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.batch-chip.dragging {
+  opacity: 0.45;
 }
 
 .batch-chip span, .batch-chip em {
