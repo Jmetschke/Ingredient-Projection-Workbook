@@ -372,6 +372,10 @@ td.shortage {
   font-weight: 700;
 }
 
+td.dashboard-deficit {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
 tr.warning td {
   background: var(--warn-bg);
 }

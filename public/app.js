@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260721-production-pointer-drag-v19";
+const APP_VERSION = "20260721-dashboard-deficit-v20";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -267,6 +267,12 @@ async function renderDashboard() {
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
     { label: "Current Inventory", numeric: true, value: (r) => forecastInventoryDisplay(r) },
+    {
+      label: "Deficit Qty",
+      numeric: true,
+      value: (r) => r.needed_to_order_qty == null ? "" : qty(r.needed_to_order_qty),
+      className: (r) => Number(r.needed_to_order_qty || 0) > 0 ? "shortage dashboard-deficit" : "",
+    },
     { label: "UOM", key: "quantity_uom" },
     { label: "Batches", numeric: true, key: "scheduled_batches" },
     { label: "Products", key: "products" },
