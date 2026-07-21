@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260720-production-drag-drop-v18";
+const APP_VERSION = "20260721-production-pointer-drag-v19";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -738,7 +738,7 @@ function productionCalendarMarkup(batches, weeks, options = {}) {
               <div class="week-range">${escapeHtml(week.label.replace(/^Week \d+ \((.*)\)$/, "$1"))}</div>
               <div class="week-batches">
                 ${scheduled.length ? scheduled.map((batch) => `
-                  <div class="batch-chip" ${options.printable ? "" : `draggable="true" data-batch-id="${batch.id}" data-source-week-id="${batch.week_id}" title="Drag to another week" aria-label="${escapeHtml(`${batch.product_name}, ${qty(batch.quantity)}. Drag to another week.`)}"`}>
+                  <div class="batch-chip" ${options.printable ? "" : `data-draggable="true" data-batch-id="${batch.id}" data-source-week-id="${batch.week_id}" title="Drag to another week" aria-label="${escapeHtml(`${batch.product_name}, ${qty(batch.quantity)}. Drag to another week.`)}"`}>
                     <span>${escapeHtml(batch.batch_type)}</span>
                     <strong>${escapeHtml(batch.product_name)}</strong>
                     <em>${qty(batch.quantity)}</em>
@@ -757,23 +757,88 @@ function renderProductionCalendar(batches, weeks) {
   const html = productionCalendarMarkup(batches, weeks);
   const calendar = document.querySelector("#production-calendar");
   calendar.innerHTML = html || `<div class="empty-calendar">No weeks found for this calendar window.</div>`;
-  let draggedBatchId = "";
-  let sourceWeekId = "";
-  calendar.querySelectorAll(".batch-chip[draggable='true']").forEach((chip) => {
-    chip.addEventListener("click", (event) => event.stopPropagation());
-    chip.addEventListener("dragstart", (event) => {
-      draggedBatchId = chip.dataset.batchId;
-      sourceWeekId = chip.dataset.sourceWeekId;
-      chip.classList.add("dragging");
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", draggedBatchId);
-    });
-    chip.addEventListener("dragend", () => {
+  let suppressChipClick = false;
+  let moveInProgress = false;
+  const clearDragTargets = () => calendar.querySelectorAll(".week-card.drag-target")
+    .forEach((card) => card.classList.remove("drag-target"));
+  const moveBatch = async (batchId, sourceWeekId, targetCard) => {
+    if (moveInProgress || !batchId || !targetCard || String(targetCard.dataset.weekId) === String(sourceWeekId)) return;
+    moveInProgress = true;
+    const targetLabel = targetCard.dataset.weekLabel;
+    setMessage("#production-message", `Moving batch to ${targetLabel}...`);
+    try {
+      await api(`/api/production-batches/${batchId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ week_id: targetCard.dataset.weekId }),
+      });
+      state.selectedProductionWeekId = "";
+      await renderProduction();
+      setMessage("#production-message", `Batch moved to ${targetLabel}.`, "success");
+    } catch (error) {
+      setMessage("#production-message", error.message, "error");
+      moveInProgress = false;
+    }
+  };
+  calendar.querySelectorAll(".batch-chip[data-draggable='true']").forEach((chip) => {
+    let pointerDrag = null;
+    const cleanupPointerDrag = () => {
       chip.classList.remove("dragging");
-      calendar.querySelectorAll(".week-card.drag-target").forEach((card) => card.classList.remove("drag-target"));
-      draggedBatchId = "";
-      sourceWeekId = "";
+      pointerDrag?.ghost?.remove();
+      clearDragTargets();
+      pointerDrag = null;
+    };
+    chip.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (suppressChipClick) event.preventDefault();
+      suppressChipClick = false;
     });
+    chip.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      pointerDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        ghost: null,
+      };
+      chip.setPointerCapture(event.pointerId);
+    });
+    chip.addEventListener("pointermove", (event) => {
+      if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+      const distance = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
+      if (!pointerDrag.ghost && distance < 6) return;
+      if (!pointerDrag.ghost) {
+        pointerDrag.ghost = chip.cloneNode(true);
+        pointerDrag.ghost.classList.add("batch-drag-ghost");
+        pointerDrag.ghost.removeAttribute("data-draggable");
+        pointerDrag.ghost.style.width = `${chip.getBoundingClientRect().width}px`;
+        document.body.appendChild(pointerDrag.ghost);
+        chip.classList.add("dragging");
+      }
+      event.preventDefault();
+      pointerDrag.ghost.style.left = `${event.clientX + 12}px`;
+      pointerDrag.ghost.style.top = `${event.clientY + 12}px`;
+      clearDragTargets();
+      const targetCard = document.elementFromPoint(event.clientX, event.clientY)?.closest(".week-card[data-week-id]");
+      if (targetCard && String(targetCard.dataset.weekId) !== String(chip.dataset.sourceWeekId)) {
+        targetCard.classList.add("drag-target");
+      }
+    });
+    chip.addEventListener("pointerup", async (event) => {
+      if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+      const didDrag = Boolean(pointerDrag.ghost);
+      const targetCard = didDrag
+        ? document.elementFromPoint(event.clientX, event.clientY)?.closest(".week-card[data-week-id]")
+        : null;
+      const batchId = chip.dataset.batchId;
+      const sourceWeekId = chip.dataset.sourceWeekId;
+      cleanupPointerDrag();
+      if (!didDrag) return;
+      suppressChipClick = true;
+      event.preventDefault();
+      event.stopPropagation();
+      await moveBatch(batchId, sourceWeekId, targetCard);
+    });
+    chip.addEventListener("pointercancel", cleanupPointerDrag);
   });
   calendar.querySelectorAll(".week-card[data-week-id]").forEach((card) => {
     const selectWeek = async () => {
@@ -785,34 +850,6 @@ function renderProductionCalendar(batches, weeks) {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       await selectWeek();
-    });
-    card.addEventListener("dragover", (event) => {
-      if (!draggedBatchId || String(card.dataset.weekId) === String(sourceWeekId)) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      card.classList.add("drag-target");
-    });
-    card.addEventListener("dragleave", (event) => {
-      if (!card.contains(event.relatedTarget)) card.classList.remove("drag-target");
-    });
-    card.addEventListener("drop", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      card.classList.remove("drag-target");
-      const batchId = draggedBatchId || event.dataTransfer.getData("text/plain");
-      if (!batchId || String(card.dataset.weekId) === String(sourceWeekId)) return;
-      setMessage("#production-message", `Moving batch to ${card.dataset.weekLabel}...`);
-      try {
-        await api(`/api/production-batches/${batchId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ week_id: card.dataset.weekId }),
-        });
-        state.selectedProductionWeekId = "";
-        await renderProduction();
-        setMessage("#production-message", `Batch moved to ${card.dataset.weekLabel}.`, "success");
-      } catch (error) {
-        setMessage("#production-message", error.message, "error");
-      }
     });
   });
 }

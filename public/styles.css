@@ -702,16 +702,26 @@ tr.warning td {
   min-width: 0;
 }
 
-.batch-chip[draggable="true"] {
+.batch-chip[data-draggable="true"] {
   cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
-.batch-chip[draggable="true"]:active {
+.batch-chip[data-draggable="true"]:active {
   cursor: grabbing;
 }
 
 .batch-chip.dragging {
   opacity: 0.45;
+}
+
+.batch-drag-ghost {
+  box-shadow: 0 8px 24px rgba(23, 32, 38, 0.24);
+  opacity: 0.92;
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
 }
 
 .batch-chip span, .batch-chip em {
