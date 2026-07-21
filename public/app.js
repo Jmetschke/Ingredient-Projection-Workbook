@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260721-dashboard-deficit-v20";
+const APP_VERSION = "20260721-inventory-aliases-v21";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -1271,6 +1271,10 @@ function renderForecastUnmatchedInventory() {
     host.innerHTML = `<div class="source-note success">Current inventory loaded. All ${uploadedCount} uploaded rows matched the master ingredient list.</div>`;
     return;
   }
+  const ingredientOptions = state.ingredients
+    .filter((ingredient) => Number(ingredient.is_master) && Number(ingredient.active) !== 0)
+    .map((ingredient) => `<option value="${ingredient.id}">${escapeHtml(ingredient.name)}</option>`)
+    .join("");
   host.innerHTML = `
     <div class="unmatched-panel">
       <div>
@@ -1282,12 +1286,24 @@ function renderForecastUnmatchedInventory() {
         { label: "Uploaded Qty", numeric: true, value: (row) => qty(row.current_qty) },
         { label: "Inventory UOM", key: "inventory_uom" },
         { label: "Gram Conversion", numeric: true, value: (row) => row.grams_per_inventory_unit == null ? "" : qty(row.grams_per_inventory_unit) },
-        { label: "Action", value: (row) => `<button class="forecast-add-ingredient" type="button" data-uploaded-name="${escapeHtml(row.uploaded_name)}" data-uom="${escapeHtml(row.quantity_uom || suggestedIngredientUom(row.uploaded_name))}">Add To Inventory</button>` },
+        { label: "Actions", value: (row) => `
+          <div class="unmatched-actions" data-row-id="${row.id}" data-uploaded-name="${escapeHtml(row.uploaded_name)}">
+            <select class="forecast-alias-ingredient" aria-label="Map ${escapeHtml(row.uploaded_name)} to ingredient">
+              <option value="">Select existing ingredient...</option>
+              ${ingredientOptions}
+            </select>
+            <button class="small forecast-map-alias" type="button">Map &amp; Remember</button>
+            <button class="small danger forecast-dismiss-inventory" type="button">Dismiss</button>
+          </div>
+        ` },
       ], rows)}
     </div>
   `;
-  host.querySelectorAll(".forecast-add-ingredient").forEach((button) => {
-    button.onclick = () => addForecastIngredientFromUpload(button);
+  host.querySelectorAll(".forecast-map-alias").forEach((button) => {
+    button.onclick = () => mapForecastInventoryAlias(button);
+  });
+  host.querySelectorAll(".forecast-dismiss-inventory").forEach((button) => {
+    button.onclick = () => dismissForecastInventorySuggestion(button);
   });
 }
 
@@ -1320,23 +1336,43 @@ async function uploadForecastInventoryPdf(input) {
   }
 }
 
-async function addForecastIngredientFromUpload(button) {
-  const name = button.dataset.uploadedName || "";
-  const purchase_uom = button.dataset.uom || suggestedIngredientUom(name);
+async function mapForecastInventoryAlias(button) {
+  const actions = button.closest(".unmatched-actions");
+  const ingredientSelect = actions.querySelector(".forecast-alias-ingredient");
+  const name = actions.dataset.uploadedName || "";
+  if (!ingredientSelect.value) {
+    setMessage("#forecast-inventory-message", `Select the existing ingredient that ${name} should map to.`, "error");
+    return;
+  }
   try {
     button.disabled = true;
-    button.textContent = "Adding...";
-    await api("/api/ingredients", {
+    button.textContent = "Mapping...";
+    const mapped = await api(`/api/inventory-upload/${actions.dataset.rowId}/map`, {
       method: "POST",
-      body: JSON.stringify({ name, purchase_uom, ingredient_type: "SB/Hijnx" }),
+      body: JSON.stringify({ ingredient_id: ingredientSelect.value }),
     });
-    await api("/api/inventory-upload/rematch", { method: "POST" });
-    await loadReference();
     await renderForecast();
-    setMessage("#forecast-inventory-message", `${name} added to the master ingredient list.`, "success");
+    setMessage("#forecast-inventory-message", `${name} mapped to ${mapped.ingredient_name}. This name will be remembered on future uploads.`, "success");
   } catch (error) {
     button.disabled = false;
-    button.textContent = "Add To Inventory";
+    button.textContent = "Map & Remember";
+    setMessage("#forecast-inventory-message", error.message, "error");
+  }
+}
+
+async function dismissForecastInventorySuggestion(button) {
+  const actions = button.closest(".unmatched-actions");
+  const name = actions.dataset.uploadedName || "this item";
+  if (!confirm(`Dismiss ${name} from the current inventory upload?`)) return;
+  try {
+    button.disabled = true;
+    button.textContent = "Dismissing...";
+    await api(`/api/inventory-upload/${actions.dataset.rowId}`, { method: "DELETE" });
+    await renderForecast();
+    setMessage("#forecast-inventory-message", `${name} dismissed from the current inventory upload.`, "success");
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Dismiss";
     setMessage("#forecast-inventory-message", error.message, "error");
   }
 }

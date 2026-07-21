@@ -376,6 +376,19 @@ td.dashboard-deficit {
   box-shadow: inset 3px 0 0 var(--danger);
 }
 
+.unmatched-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 360px;
+}
+
+.unmatched-actions select {
+  flex: 1 1 190px;
+  min-width: 190px;
+}
+
 tr.warning td {
   background: var(--warn-bg);
 }

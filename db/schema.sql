@@ -100,6 +100,15 @@ CREATE TABLE IF NOT EXISTS latest_inventory_rows (
   uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS inventory_ingredient_aliases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alias TEXT NOT NULL,
+  normalized_alias TEXT NOT NULL UNIQUE,
+  ingredient_id INTEGER NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS manual_inventory_adjustments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ingredient_id INTEGER REFERENCES ingredients(id) ON DELETE SET NULL,
@@ -149,6 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_batches_product_week ON production_batches(produc
 CREATE INDEX IF NOT EXISTS idx_batches_week ON production_batches(week_id);
 CREATE INDEX IF NOT EXISTS idx_batch_sizes_product ON product_batch_sizes(product_id);
 CREATE INDEX IF NOT EXISTS idx_latest_inventory_ingredient ON latest_inventory_rows(ingredient_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_alias_ingredient ON inventory_ingredient_aliases(ingredient_id);
 CREATE INDEX IF NOT EXISTS idx_manual_inventory_adjustments_ingredient ON manual_inventory_adjustments(ingredient_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_formula_product ON product_formulas(product_id);
 CREATE INDEX IF NOT EXISTS idx_formula_ingredient ON product_formulas(ingredient_id);

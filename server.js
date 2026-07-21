@@ -424,19 +424,24 @@ function scoreIngredientMatch(uploadName, ingredientName) {
   return intersection / union;
 }
 
-function matchInventoryRows(rows, ingredients) {
+function matchInventoryRows(rows, ingredients, aliasIngredients = new Map()) {
   return rows.map((row) => {
+    const aliasIngredient = aliasIngredients.get(normalizeMatchText(row.uploaded_name));
     const scored = ingredients
       .map((ingredient) => ({ ingredient, score: scoreIngredientMatch(row.uploaded_name, ingredient.name) }))
       .sort((a, b) => b.score - a.score)[0];
-    const match = scored?.score >= 0.5 ? scored : null;
+    const match = aliasIngredient
+      ? { ingredient: aliasIngredient, score: 1, method: "alias" }
+      : scored?.score >= 0.5
+        ? { ...scored, method: scored.score === 1 ? "exact" : "fuzzy" }
+        : null;
     const matchedRow = {
       ...row,
       ingredient_id: match?.ingredient.id || null,
       ingredient_name: match?.ingredient.name || "",
       ingredient_type: normalizeIngredientType(match?.ingredient.ingredient_type),
       match_score: Number((match?.score || 0).toFixed(3)),
-      match_method: match ? (match.score === 1 ? "exact" : "fuzzy") : "unmatched",
+      match_method: match?.method || "unmatched",
       quantity_uom: match?.ingredient.purchase_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
     };
     return withInventoryConversion(matchedRow, match?.ingredient.name);
@@ -518,6 +523,16 @@ async function activeMasterIngredients() {
   return rows.map(withBomUom);
 }
 
+async function inventoryAliasIngredients() {
+  const rows = await all(`
+    SELECT a.normalized_alias, i.id, i.name, i.purchase_uom, i.ingredient_type
+    FROM inventory_ingredient_aliases a
+    JOIN ingredients i ON i.id = a.ingredient_id
+    WHERE i.is_master = 1 AND i.active = 1
+  `);
+  return new Map(rows.map((row) => [row.normalized_alias, withBomUom(row)]));
+}
+
 async function replaceLatestInventoryRows(rows) {
   await run("DELETE FROM latest_inventory_rows");
   for (const row of rows) {
@@ -550,7 +565,7 @@ async function rematchLatestInventoryRows() {
     quantity_uom: row.quantity_uom || guessInventoryUom(row.uploaded_name),
     inventory_uom: row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
   }));
-  const matched = matchInventoryRows(rawRows, await activeMasterIngredients());
+  const matched = matchInventoryRows(rawRows, await activeMasterIngredients(), await inventoryAliasIngredients());
   await replaceLatestInventoryRows(matched);
   return latestInventoryRows();
 }
@@ -1743,7 +1758,7 @@ app.post("/api/inventory-upload", express.raw({ type: ["application/pdf", "appli
     if (!buffer.length) return fail(res, new Error("Upload a PDF inventory valuation report."), 400);
     const parsedRows = rowsFromDistruInventoryPdf(buffer);
     if (!parsedRows.length) return fail(res, new Error("No inventory rows were found in that PDF."), 400);
-    const matchedRows = matchInventoryRows(parsedRows, await activeMasterIngredients());
+    const matchedRows = matchInventoryRows(parsedRows, await activeMasterIngredients(), await inventoryAliasIngredients());
     await replaceLatestInventoryRows(matchedRows);
     const savedRows = await latestInventoryRows();
     ok(res, {
@@ -1764,6 +1779,71 @@ app.post("/api/inventory-upload/rematch", async (req, res) => {
       matched: rows.filter((row) => row.ingredient_id).length,
       unmatched: rows.filter((row) => !row.ingredient_id).length,
     });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+app.post("/api/inventory-upload/:id/map", async (req, res) => {
+  try {
+    const rowId = Number(req.params.id);
+    const ingredientId = Number(req.body.ingredient_id);
+    const row = await one("SELECT * FROM latest_inventory_rows WHERE id = ?", [rowId]);
+    if (!row) return fail(res, new Error("Inventory suggestion not found"), 404);
+    const ingredientRow = await one(`
+      SELECT id, name, purchase_uom, ingredient_type
+      FROM ingredients
+      WHERE id = ? AND is_master = 1 AND active = 1
+    `, [ingredientId]);
+    if (!ingredientRow) return fail(res, new Error("Select a valid master ingredient"), 400);
+    const normalizedAlias = normalizeMatchText(row.uploaded_name);
+    if (!normalizedAlias) return fail(res, new Error("Uploaded item name cannot be used as an alias"), 400);
+    const ingredient = withBomUom(ingredientRow);
+    const mapped = withInventoryConversion({
+      ...row,
+      ingredient_id: ingredient.id,
+      ingredient_name: ingredient.name,
+      ingredient_type: ingredient.ingredient_type,
+      match_score: 1,
+      match_method: "alias",
+      quantity_uom: ingredient.purchase_uom || row.quantity_uom,
+    }, ingredient.name);
+    await withTransaction(async (tx) => {
+      await tx.run(`
+        INSERT INTO inventory_ingredient_aliases (alias, normalized_alias, ingredient_id, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(normalized_alias) DO UPDATE SET
+          alias = excluded.alias,
+          ingredient_id = excluded.ingredient_id,
+          updated_at = CURRENT_TIMESTAMP
+      `, [row.uploaded_name, normalizedAlias, ingredient.id]);
+      await tx.run(`
+        UPDATE latest_inventory_rows
+        SET quantity_uom = ?, inventory_uom = ?, grams_per_inventory_unit = ?, current_qty_grams = ?,
+            ingredient_id = ?, ingredient_name = ?, ingredient_type = ?, match_score = 1, match_method = 'alias'
+        WHERE id = ?
+      `, [
+        mapped.quantity_uom,
+        mapped.inventory_uom,
+        mapped.grams_per_inventory_unit ?? null,
+        mapped.current_qty_grams ?? null,
+        ingredient.id,
+        ingredient.name,
+        normalizeIngredientType(ingredient.ingredient_type),
+        rowId,
+      ]);
+    });
+    ok(res, { id: rowId, alias: row.uploaded_name, ingredient_id: ingredient.id, ingredient_name: ingredient.name });
+  } catch (error) {
+    fail(res, error, 400);
+  }
+});
+
+app.delete("/api/inventory-upload/:id", async (req, res) => {
+  try {
+    const result = await run("DELETE FROM latest_inventory_rows WHERE id = ? AND ingredient_id IS NULL", [Number(req.params.id)]);
+    if (!result.changes) return fail(res, new Error("Unmatched inventory suggestion not found"), 404);
+    ok(res, { id: Number(req.params.id) });
   } catch (error) {
     fail(res, error);
   }
