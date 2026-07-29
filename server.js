@@ -1272,25 +1272,29 @@ app.post("/api/products", async (req, res) => {
     const category = String(req.body.category || "").trim();
     const batchSize = Number(req.body.batch_size);
     if (!name) return fail(res, new Error("Production batch name is required"), 400);
+    if (name.length > 160) return fail(res, new Error("Production batch name must be 160 characters or fewer"), 400);
     if (!BATCH_TYPES.includes(category)) return fail(res, new Error("Select Hijnx or Snackbar for the batch type"), 400);
-    if (batchSize <= 0) return fail(res, new Error("Average batch size must be greater than zero"), 400);
+    if (!Number.isFinite(batchSize) || batchSize <= 0) return fail(res, new Error("Batch QTY must be greater than zero"), 400);
     const existing = await one("SELECT id FROM products WHERE lower(name) = lower(?)", [name]);
     if (existing) return fail(res, new Error("Production batch already exists"), 400);
-    const info = await run(
-      "INSERT INTO products (name, category, active) VALUES (?, ?, 1)",
-      [name, category],
-    );
-    await run(
-      `INSERT INTO product_batch_sizes (product_id, batch_size, updated_at)
-       VALUES (?, ?, CURRENT_TIMESTAMP)`,
-      [info.lastInsertRowid, batchSize],
-    );
+    const productId = await withTransaction(async (tx) => {
+      const info = await tx.run(
+        "INSERT INTO products (name, category, active) VALUES (?, ?, 1)",
+        [name, category],
+      );
+      await tx.run(
+        `INSERT INTO product_batch_sizes (product_id, batch_size, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)`,
+        [info.lastInsertRowid, batchSize],
+      );
+      return info.lastInsertRowid;
+    });
     ok(res, await one(`
       SELECT p.id, p.name, p.sku, p.category, p.active, pbs.batch_size
       FROM products p
       LEFT JOIN product_batch_sizes pbs ON pbs.product_id = p.id
       WHERE p.id = ?
-    `, [info.lastInsertRowid]));
+    `, [productId]));
   } catch (error) {
     fail(res, error);
   }

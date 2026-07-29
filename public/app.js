@@ -27,7 +27,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260721-inventory-aliases-v21";
+const APP_VERSION = "20260729-manual-production-batches-v22";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -2398,7 +2398,11 @@ document.querySelector("#formula-product-form").addEventListener("submit", async
     });
     form.reset();
     state.selectedFormulaProductId = String(created.id);
-    setMessage("#formula-product-message", `Added ${created.name}.`, "success");
+    setMessage(
+      "#formula-product-message",
+      `Added ${created.name}. It is now available in the Production Planner and Velocity Calculator.`,
+      "success",
+    );
     await loadReference();
     await renderFormulas();
   } catch (error) {

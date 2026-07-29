@@ -1300,6 +1300,31 @@ td.order-needed {
   margin: 0;
 }
 
+.bom-batch-panel > .section-head {
+  align-items: start;
+  display: grid;
+  gap: 2px;
+}
+
+.formula-product-form {
+  background: #f4f9f8;
+  border: 1px solid #b9d1cd;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.formula-product-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.formula-product-form button {
+  width: 100%;
+}
+
 .batch-list {
   display: grid;
   gap: 8px;
@@ -1483,14 +1508,6 @@ td.order-needed {
 
 .formula-editor-toolbar button {
   min-width: 190px;
-}
-
-.formula-product-create-panel {
-  margin-top: 4px;
-}
-
-.formula-product-form {
-  grid-template-columns: minmax(240px, 1fr) minmax(140px, 180px) minmax(150px, 220px) minmax(130px, auto);
 }
 
 .stack-form {
