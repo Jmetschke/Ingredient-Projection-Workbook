@@ -1325,6 +1325,54 @@ td.order-needed {
   width: 100%;
 }
 
+.batch-ingredient-calculator {
+  display: grid;
+  gap: 14px;
+}
+
+.batch-ingredient-form {
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 260px) minmax(180px, auto);
+}
+
+.batch-ingredient-summary {
+  background: #eef5f4;
+  border: 1px solid #b9d1cd;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  padding: 12px 14px;
+}
+
+.batch-ingredient-summary div {
+  display: grid;
+  gap: 2px;
+}
+
+.batch-ingredient-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.batch-ingredient-summary strong {
+  font-size: 17px;
+}
+
+.batch-ingredient-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.batch-ingredient-actions[hidden] {
+  display: none;
+}
+
+.batch-ingredient-actions .button-link,
+.batch-ingredient-actions button {
+  min-width: 150px;
+  text-align: center;
+}
+
 .batch-list {
   display: grid;
   gap: 8px;
@@ -1624,7 +1672,7 @@ pre {
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .formula-batch-size-form, .formula-product-form, .production-week-add-form {
+  .topbar, .grid.two, .inline-form, .production-tools, .forecast-tools, .velocity-tools, .velocity-size-form, .velocity-schedule-form, .production-workspace, .bom-layout, .bom-form, .formula-batch-size-form, .formula-product-form, .batch-ingredient-form, .production-week-add-form {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -1641,6 +1689,7 @@ pre {
   .bom-copy-form button,
   .formula-batch-size-form button,
   .formula-product-form button,
+  .batch-ingredient-form button,
   .inventory-add-form button {
     width: 100%;
   }

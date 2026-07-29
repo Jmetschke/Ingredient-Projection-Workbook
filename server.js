@@ -2342,6 +2342,82 @@ app.get("/api/production-ingredient-report", async (req, res) => {
   }
 });
 
+async function batchIngredientQtyReport(query = {}) {
+  const productId = Number(query.product_id);
+  const pieces = Number(query.pieces);
+  if (!Number.isInteger(productId) || productId <= 0) throw new Error("Select a valid production batch");
+  if (!Number.isFinite(pieces) || pieces <= 0) throw new Error("QTY of pieces made must be greater than zero");
+  const product = await one(`
+    SELECT id, name, category
+    FROM products
+    WHERE id = ? AND active = 1 AND category IN ('Hijnx', 'Snackbar')
+  `, [productId]);
+  if (!product) throw new Error("Production batch not found");
+  const ingredients = await all(`
+    SELECT i.name AS ingredient_name,
+           pf.quantity_per_unit,
+           pf.quantity_uom,
+           pf.quantity_per_unit * ? AS total_quantity
+    FROM product_formulas pf
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE pf.product_id = ?
+      AND pf.source_sheet IS NULL
+      AND pf.quantity_per_unit > 0
+    ORDER BY i.name
+  `, [pieces, productId]);
+  if (!ingredients.length) throw new Error("This production batch does not have a BOM in Formula Manager");
+  return { product, pieces, ingredients };
+}
+
+app.get("/api/batch-ingredient-qty", async (req, res) => {
+  try {
+    ok(res, await batchIngredientQtyReport(req.query));
+  } catch (error) {
+    fail(res, error, 400);
+  }
+});
+
+app.get("/api/batch-ingredient-qty/pdf", async (req, res) => {
+  try {
+    const report = await batchIngredientQtyReport(req.query);
+    const cleanName = report.product.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "production-batch";
+    const doc = new PDFDocument({ size: "LETTER", margin: 44 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${cleanName}-ingredient-qty.pdf"`);
+    doc.pipe(res);
+    doc.font("Helvetica-Bold").fontSize(20).fillColor("#172026").text("Batch Ingredient Quantity");
+    doc.moveDown(0.3);
+    doc.font("Helvetica-Bold").fontSize(13).text(report.product.name);
+    doc.font("Helvetica").fontSize(10).fillColor("#5f6c72")
+      .text(`Pieces Made: ${formatReportQty(report.pieces)}`)
+      .text(`Generated: ${new Date().toLocaleString("en-US")}`);
+    doc.moveDown(0.8);
+    const columns = [
+      { width: 230 },
+      { width: 90, align: "right" },
+      { width: 110, align: "right" },
+      { width: 70 },
+    ];
+    writePdfTableRow(doc, columns, ["Ingredient", "Qty Per Piece", "Total Needed", "UOM"], {
+      bold: true,
+      fill: "#eef3f2",
+      minHeight: 22,
+    });
+    report.ingredients.forEach((row) => {
+      writePdfTableRow(doc, columns, [
+        row.ingredient_name,
+        formatReportQty(row.quantity_per_unit),
+        formatReportQty(row.total_quantity),
+        row.quantity_uom,
+      ], { minHeight: 21, fontSize: 9 });
+    });
+    doc.end();
+  } catch (error) {
+    if (!res.headersSent) fail(res, error, 400);
+    else res.end();
+  }
+});
+
 app.get("/api/export/production-ingredients", async (req, res) => {
   try {
     const report = await productionIngredientReport(req.query);

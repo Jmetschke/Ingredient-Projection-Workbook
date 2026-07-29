@@ -43,6 +43,7 @@
         <button data-tab="production">Production Planner</button>
         <button data-tab="rl-scheduled-batches">RL Scheduled Batches</button>
         <button data-tab="velocity">Velocity Calculator</button>
+        <button data-tab="batch-ingredient-qty">Batch Ingredient QTY</button>
         <button data-tab="forecast">Ingredient Forecast</button>
         <button data-tab="inventory">Inventory</button>
         <button data-tab="formulas">Formula Manager</button>
@@ -367,6 +368,33 @@
         <div id="velocity-size-editor" class="velocity-size-editor"></div>
       </section>
 
+      <section id="batch-ingredient-qty" class="view">
+        <div class="section-head">
+          <h2>Batch Ingredient Quantity</h2>
+          <span>Calculate the complete ingredient requirement for a production run</span>
+        </div>
+        <div class="focus-panel batch-ingredient-calculator">
+          <form id="batch-ingredient-form" class="inline-form batch-ingredient-form">
+            <label class="form-field">
+              <span>Production Batch</span>
+              <select name="product_id" required></select>
+            </label>
+            <label class="form-field">
+              <span>QTY of Pieces Made</span>
+              <input name="pieces" type="number" min="0.000001" step="0.000001" placeholder="Pieces" required>
+            </label>
+            <button type="submit">Calculate Ingredients</button>
+          </form>
+          <div id="batch-ingredient-message" class="form-message"></div>
+          <div id="batch-ingredient-summary"></div>
+          <div id="batch-ingredient-actions" class="batch-ingredient-actions" hidden>
+            <a id="batch-ingredient-pdf" class="button-link" href="#">Export PDF</a>
+            <button id="batch-ingredient-print" type="button">Print</button>
+          </div>
+          <div id="batch-ingredient-table"></div>
+        </div>
+      </section>
+
       <section id="inventory" class="view">
         <div class="section-head">
           <h2>Add Inventory Item</h2>
@@ -497,6 +525,6 @@
 
     </main>
 
-    <script src="/app.js?v=20260729-manual-production-batches-v22"></script>
+    <script src="/app.js?v=20260729-batch-ingredient-qty-v23"></script>
   </body>
 </html>

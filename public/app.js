@@ -24,10 +24,11 @@ const state = {
   velocitySchedulePreview: null,
   selectedFormulaProductId: "",
   selectedProductionWeekId: "",
+  batchIngredientReport: null,
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260729-manual-production-batches-v22";
+const APP_VERSION = "20260729-batch-ingredient-qty-v23";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -62,6 +63,7 @@ const titles = {
   production: ["Production Planner", "Schedule batches and calculate ingredient needs from calendar entries."],
   "rl-scheduled-batches": ["RL Scheduled Batches", "Read-only calendar from the RL scheduling database."],
   velocity: ["Velocity Calculator", "Project production batch quantities from units sold per day."],
+  "batch-ingredient-qty": ["Batch Ingredient QTY", "Calculate ingredients needed for a specific quantity of finished pieces."],
   forecast: ["Ingredient Forecast", "Scheduled BOM usage totals from Production Planner batches."],
   inventory: ["Inventory", "Add new items to the master inventory list."],
   formulas: ["Formula Manager", "Batch-level BOM setup using grams and each."],
@@ -2066,6 +2068,88 @@ async function renderFormulas() {
   await refreshFormulaManager();
 }
 
+async function renderBatchIngredientQty() {
+  const form = document.querySelector("#batch-ingredient-form");
+  const select = form.querySelector("select[name='product_id']");
+  const currentProductId = select.value || state.batchIngredientReport?.product.id || "";
+  const products = state.products
+    .filter((product) => Number(product.active) && ["Hijnx", "Snackbar"].includes(product.category))
+    .sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.name).localeCompare(String(b.name)));
+  select.innerHTML = products.map((product) => (
+    `<option value="${product.id}">${escapeHtml(product.category === "Snackbar" ? "SB" : product.category)} - ${escapeHtml(product.name)}</option>`
+  )).join("");
+  if (products.some((product) => String(product.id) === String(currentProductId))) select.value = String(currentProductId);
+  renderBatchIngredientReport(state.batchIngredientReport);
+}
+
+function renderBatchIngredientReport(report) {
+  const summary = document.querySelector("#batch-ingredient-summary");
+  const actions = document.querySelector("#batch-ingredient-actions");
+  const tableContainer = document.querySelector("#batch-ingredient-table");
+  if (!report) {
+    summary.innerHTML = "";
+    actions.hidden = true;
+    tableContainer.innerHTML = `<div class="empty-calendar">Select a production batch and enter the number of pieces to calculate ingredient totals.</div>`;
+    return;
+  }
+  summary.innerHTML = `
+    <div><span>Production Batch</span><strong>${escapeHtml(report.product.name)}</strong></div>
+    <div><span>Pieces Made</span><strong>${qty(report.pieces)}</strong></div>
+    <div><span>Ingredients</span><strong>${report.ingredients.length}</strong></div>
+  `;
+  actions.hidden = false;
+  document.querySelector("#batch-ingredient-pdf").href = `/api/batch-ingredient-qty/pdf?product_id=${encodeURIComponent(report.product.id)}&pieces=${encodeURIComponent(report.pieces)}`;
+  tableContainer.innerHTML = table([
+    { label: "Ingredient", key: "ingredient_name" },
+    { label: "Qty Per Piece", numeric: true, value: (row) => qty(row.quantity_per_unit) },
+    { label: "Total Needed", numeric: true, value: (row) => qty(row.total_quantity) },
+    { label: "UOM", key: "quantity_uom" },
+  ], report.ingredients);
+}
+
+function printBatchIngredientReport(report) {
+  if (!report) return;
+  const printWindow = window.open("", "_blank", "width=900,height=750");
+  if (!printWindow) {
+    setMessage("#batch-ingredient-message", "Allow pop-ups to print the ingredient quantity report.", "error");
+    return;
+  }
+  const rows = report.ingredients.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.ingredient_name)}</td>
+      <td class="numeric">${qty(row.quantity_per_unit)}</td>
+      <td class="numeric">${qty(row.total_quantity)}</td>
+      <td>${escapeHtml(row.quantity_uom)}</td>
+    </tr>
+  `).join("");
+  printWindow.document.write(`
+    <!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(report.product.name)} Ingredient QTY</title>
+    <style>
+      body { color: #172026; font-family: Arial, sans-serif; margin: 0; padding: 28px; }
+      header { border-bottom: 2px solid #172026; margin-bottom: 18px; padding-bottom: 12px; }
+      h1 { font-size: 22px; margin: 0 0 7px; }
+      .meta { color: #5f6c72; font-size: 12px; line-height: 1.5; }
+      table { border-collapse: collapse; font-size: 12px; width: 100%; }
+      th, td { border: 1px solid #d9e2e5; padding: 8px; text-align: left; }
+      th { background: #eef3f2; }
+      .numeric { text-align: right; }
+      tr { break-inside: avoid; }
+      @page { margin: 0.5in; }
+      @media print { body { padding: 0; } }
+    </style></head><body>
+      <header>
+        <h1>Batch Ingredient Quantity</h1>
+        <div><strong>${escapeHtml(report.product.name)}</strong></div>
+        <div class="meta">Pieces Made: ${qty(report.pieces)} · Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+      </header>
+      <table><thead><tr><th>Ingredient</th><th class="numeric">Qty Per Piece</th><th class="numeric">Total Needed</th><th>UOM</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <script>window.addEventListener("load", () => window.print());<\/script>
+    </body></html>
+  `);
+  printWindow.document.close();
+}
+
 async function refreshFormulaManager() {
   const data = await api(`/api/formulas?_=${Date.now()}`);
   const batches = data.products;
@@ -2233,6 +2317,7 @@ const renderers = {
   production: renderProduction,
   "rl-scheduled-batches": renderRlScheduledBatches,
   velocity: renderVelocity,
+  "batch-ingredient-qty": renderBatchIngredientQty,
   forecast: renderForecast,
   inventory: renderInventory,
   formulas: renderFormulas,
@@ -2249,6 +2334,26 @@ async function activate(tab) {
 
 document.querySelector("#tabs").addEventListener("click", async (event) => {
   if (event.target.matches("button[data-tab]")) await activate(event.target.dataset.tab);
+});
+
+document.querySelector("#batch-ingredient-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  setMessage("#batch-ingredient-message", "Calculating ingredient totals...");
+  try {
+    const params = new URLSearchParams(Object.fromEntries(new FormData(form).entries()));
+    state.batchIngredientReport = await api(`/api/batch-ingredient-qty?${params.toString()}`);
+    setMessage("#batch-ingredient-message", "Ingredient totals calculated.", "success");
+    renderBatchIngredientReport(state.batchIngredientReport);
+  } catch (error) {
+    state.batchIngredientReport = null;
+    renderBatchIngredientReport(null);
+    setMessage("#batch-ingredient-message", error.message, "error");
+  }
+});
+
+document.querySelector("#batch-ingredient-print").addEventListener("click", () => {
+  printBatchIngredientReport(state.batchIngredientReport);
 });
 
 document.querySelector("#refresh").addEventListener("click", async () => {
