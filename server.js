@@ -158,12 +158,19 @@ function inflatePdfStreams(buffer) {
   return streams;
 }
 
+function pdfObjectBody(source, objectId) {
+  const objectRe = new RegExp(`(?:^|[\\r\\n])${objectId}\\s+0\\s+obj\\b`);
+  const objectMatch = objectRe.exec(source);
+  if (!objectMatch) return "";
+  const start = objectMatch.index + objectMatch[0].search(/\d/);
+  const end = source.indexOf("endobj", start);
+  return source.slice(start, end < 0 ? undefined : end);
+}
+
 function inflatePdfObject(buffer, objectId) {
   const source = buffer.toString("latin1");
-  const start = source.indexOf(`${objectId} 0 obj`);
-  if (start < 0) return "";
-  const end = source.indexOf("endobj", start);
-  const body = source.slice(start, end < 0 ? undefined : end);
+  const body = pdfObjectBody(source, objectId);
+  if (!body) return "";
   const stream = body.match(/stream\r?\n([\s\S]*?)\r?\nendstream/);
   if (!stream) return "";
   try {
@@ -207,6 +214,24 @@ function pdfCMap(buffer, objectId) {
 
 function distruFontMaps(buffer) {
   const source = buffer.toString("latin1");
+  const discoveredFontMaps = new Map();
+  const fontResourceRe = /\/(F\d+)\s+(\d+)\s+0\s+R/g;
+  let fontResource;
+  while ((fontResource = fontResourceRe.exec(source))) {
+    const [, fontName, fontObjectId] = fontResource;
+    if (discoveredFontMaps.has(fontName)) continue;
+    const fontObject = pdfObjectBody(source, Number(fontObjectId));
+    if (!fontObject) continue;
+    const toUnicode = fontObject.match(/\/ToUnicode\s+(\d+)\s+0\s+R/);
+    if (toUnicode) discoveredFontMaps.set(fontName, Number(toUnicode[1]));
+  }
+  const discoveredMaps = new Map(
+    [...discoveredFontMaps.entries()]
+      .map(([font, objectId]) => [font, pdfCMap(buffer, objectId)])
+      .filter(([, map]) => map.size),
+  );
+  if (discoveredMaps.size) return discoveredMaps;
+
   const dynamicMapIds = [];
   const toUnicodeRe = /\/ToUnicode\s+(\d+)\s+0\s+R/g;
   let match;
@@ -214,8 +239,8 @@ function distruFontMaps(buffer) {
     const objectId = Number(match[1]);
     if (!dynamicMapIds.includes(objectId)) dynamicMapIds.push(objectId);
   }
-  // Distru valuation PDFs rendered by Chromium/Skia use F4-F9 for the visible table.
-  // The ToUnicode object ids change between exports, so discover them dynamically.
+  // Compatibility fallback for older Distru exports whose font resource objects
+  // cannot be associated directly with their ToUnicode maps.
   const fontNames = ["F4", "F5", "F6", "F7", "F8", "F9"];
   const candidateMaps = dynamicMapIds.length >= fontNames.length
     ? Object.fromEntries(fontNames.map((font, index) => [font, dynamicMapIds[index]]))
