@@ -29,7 +29,7 @@ body {
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 100vh;
   max-width: 100%;
-  overflow-x: clip;
+  overflow-x: auto;
 }
 
 .suite-navigation {
@@ -149,8 +149,10 @@ nav button.active, nav button:hover {
 
 main {
   min-width: 0;
+  max-width: 100%;
   padding: 22px;
-  overflow-x: clip;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .topbar {
@@ -240,11 +242,21 @@ button.ghost {
 
 .view {
   display: none;
+  min-width: 0;
+  width: 100%;
 }
 
 .view.active {
   display: grid;
   gap: 18px;
+}
+
+/* Keep every tab inside the page column so wide content scrolls instead of
+   being clipped by an intermediate grid item. */
+.view > *,
+section > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 section {
@@ -318,11 +330,13 @@ section {
 }
 
 .table-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
   max-height: 68vh;
   border: 1px solid var(--line);
   border-radius: 8px;
   max-width: 100%;
+  width: 100%;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-inline: contain;
 }
