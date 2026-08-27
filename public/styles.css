@@ -1199,6 +1199,14 @@ td.order-needed {
   max-height: 520px;
 }
 
+.inventory-list-head {
+  margin-bottom: 12px;
+}
+
+.inventory-list-head h2 {
+  margin-bottom: 0;
+}
+
 .editor-table {
   min-width: 560px;
 }

@@ -1998,6 +1998,7 @@ function renderVelocitySizeEditor(products) {
 async function renderInventory() {
   const ingredients = await api("/api/ingredients");
   const rows = filteredRows(ingredients.filter((ingredient) => Number(ingredient.is_master)), ["name", "purchase_uom", "ingredient_type"]);
+  document.querySelector("#inventory-print").onclick = () => printInventoryCountSheet(rows);
   document.querySelector("#inventory-table").innerHTML = rows.length ? `
     <div class="table-wrap editor-table-wrap">
       <table class="editor-table inventory-table">
@@ -2062,6 +2063,65 @@ async function renderInventory() {
       }
     });
   });
+}
+
+function printInventoryCountSheet(rows) {
+  const printWindow = window.open("", "_blank", "width=900,height=850");
+  if (!printWindow) {
+    setMessage("#inventory-message", "Allow pop-ups to print the inventory count sheet.", "error");
+    return;
+  }
+  const printedAt = new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(new Date());
+  const tableRows = rows.map((ingredient) => `
+    <tr>
+      <td>${escapeHtml(ingredient.name)}</td>
+      <td>${escapeHtml(ingredient.ingredient_type || "")}</td>
+      <td>${escapeHtml(ingredient.purchase_uom || "")}</td>
+      <td class="count-space"></td>
+    </tr>
+  `).join("");
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Inventory Count Sheet</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 24px; color: #172026; font-family: Arial, sans-serif; background: white; }
+          header { border-bottom: 2px solid #172026; margin-bottom: 16px; padding-bottom: 10px; }
+          h1 { font-size: 22px; margin: 0 0 6px; }
+          p { color: #5f6c72; font-size: 12px; margin: 0; }
+          table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+          th, td { border: 1px solid #66737a; font-size: 12px; padding: 8px; text-align: left; }
+          th { background: #edf2f3; }
+          th:nth-child(1) { width: 38%; }
+          th:nth-child(2) { width: 18%; }
+          th:nth-child(3) { width: 14%; }
+          th:nth-child(4) { width: 30%; }
+          tbody tr { break-inside: avoid; page-break-inside: avoid; }
+          td.count-space { height: 38px; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <header>
+          <h1>Inventory Count Sheet</h1>
+          <p>${escapeHtml(printedAt)} · ${rows.length} inventory item${rows.length === 1 ? "" : "s"}</p>
+        </header>
+        <table>
+          <thead><tr><th>Inventory Item</th><th>Ingredient Type</th><th>UOM</th><th>Current Inventory Count</th></tr></thead>
+          <tbody>${tableRows || `<tr><td colspan="4">No inventory items in the current list.</td></tr>`}</tbody>
+        </table>
+        <script>window.addEventListener("load", () => window.print());<\/script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
 }
 
 async function renderFormulas() {
