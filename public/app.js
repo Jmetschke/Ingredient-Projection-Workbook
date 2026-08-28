@@ -265,6 +265,12 @@ async function renderDashboard() {
   document.querySelector("#kpis").innerHTML = Object.entries(data.counts).map(([key, value]) => `
     <div class="kpi"><strong>${value}</strong><span>${kpiLabels[key] || key}</span></div>
   `).join("");
+  const inventoryRows = data.ingredientUsage?.rows || [];
+  const inventoryAsOf = data.ingredientUsage?.inventory_as_of || "";
+  document.querySelector("#dashboard-inventory-as-of").textContent = inventoryAsOf
+    ? `Current inventory as of ${formatInventoryAsOf(inventoryAsOf)}`
+    : "No current inventory snapshot loaded";
+  document.querySelector("#dashboard-print-inventory").onclick = () => printDashboardInventory(inventoryRows, inventoryAsOf);
   document.querySelector("#dashboard-ingredient-usage").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
@@ -280,8 +286,79 @@ async function renderDashboard() {
     { label: "Products", key: "products" },
     { label: "First Week", key: "first_week" },
     { label: "Last Week", key: "last_week" },
-  ], filteredRows(data.ingredientUsage?.rows || [], ["ingredient_name", "quantity_uom", "products"]));
+  ], filteredRows(inventoryRows, ["ingredient_name", "quantity_uom", "products"]));
   renderDashboardProductionCalendar(data.productionBatches || [], (data.productionWeeks || []).map(weekMeta));
+}
+
+function formatInventoryAsOf(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "Not available";
+  const normalized = /[zZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : `${raw.replace(" ", "T")}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function printDashboardInventory(rows, inventoryAsOf) {
+  const printWindow = window.open("", "_blank", "width=900,height=850");
+  if (!printWindow) {
+    alert("Allow pop-ups to print the current inventory report.");
+    return;
+  }
+  const inventoryRows = rows
+    .filter((row) => row.current_inventory != null || row.current_inventory_grams != null)
+    .sort((a, b) => String(a.ingredient_name).localeCompare(String(b.ingredient_name)));
+  const tableRows = inventoryRows.map((row) => {
+    const totalGrams = String(row.quantity_uom || "").toLowerCase() === "each"
+      ? "—"
+      : row.current_inventory_grams == null ? "—" : qty(row.current_inventory_grams);
+    const totalUnits = row.current_inventory == null
+      ? "—"
+      : `${qty(row.current_inventory)} ${escapeHtml(row.inventory_source_uom || row.inventory_uom || "units")}`;
+    return `<tr><td>${escapeHtml(row.ingredient_name)}</td><td class="numeric">${totalGrams}</td><td class="numeric">${totalUnits}</td></tr>`;
+  }).join("");
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Current Inventory</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 24px; color: #172026; font-family: Arial, sans-serif; background: white; }
+          header { border-bottom: 2px solid #172026; margin-bottom: 16px; padding-bottom: 10px; }
+          h1 { font-size: 22px; margin: 0 0 6px; }
+          p { color: #5f6c72; font-size: 12px; margin: 0; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #66737a; font-size: 12px; padding: 8px; text-align: left; }
+          th { background: #edf2f3; }
+          th:first-child { width: 50%; }
+          th:nth-child(2), th:nth-child(3) { width: 25%; }
+          .numeric { text-align: right; }
+          tbody tr { break-inside: avoid; page-break-inside: avoid; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <header>
+          <h1>Current Inventory</h1>
+          <p>As of ${escapeHtml(formatInventoryAsOf(inventoryAsOf))} · ${inventoryRows.length} item${inventoryRows.length === 1 ? "" : "s"}</p>
+        </header>
+        <table>
+          <thead><tr><th>Name</th><th class="numeric">Total Grams on Hand</th><th class="numeric">Total Units on Hand</th></tr></thead>
+          <tbody>${tableRows || `<tr><td colspan="3">No current inventory snapshot is loaded.</td></tr>`}</tbody>
+        </table>
+        <script>window.addEventListener("load", () => window.print());<\/script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
 }
 
 function renderDashboardProductionCalendar(batches, weeks) {

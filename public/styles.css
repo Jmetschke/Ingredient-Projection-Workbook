@@ -329,6 +329,18 @@ section {
   min-height: 150px;
 }
 
+.dashboard-inventory-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: flex-end;
+}
+
+.dashboard-inventory-actions span {
+  color: var(--muted);
+}
+
 .table-wrap {
   overflow-x: auto;
   overflow-y: auto;

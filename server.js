@@ -1003,6 +1003,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
       current_inventory: inventory ? inventory.current_qty : null,
       current_inventory_grams: currentInventoryGrams,
       current_inventory_value: currentInventoryValue,
+      inventory_as_of: inventory?.uploaded_at || null,
       prior_usage_qty: priorUsage,
       starting_inventory_value: startingInventoryValue,
       projected_remaining_qty: projectedRemainingQty,
@@ -1066,6 +1067,10 @@ async function scheduledIngredientUsageForecast(query = {}) {
   `, { start, end });
   return {
     filters: { weeks: weekCount, start, end, baseline_start: baselineStart },
+    inventory_as_of: inventoryRows.reduce((latest, row) => {
+      const timestamp = String(row.uploaded_at || "");
+      return timestamp > latest ? timestamp : latest;
+    }, ""),
     rows: rowsWithInventory,
     detail,
     inventoryRows,
