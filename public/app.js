@@ -167,6 +167,16 @@ function addMonths(date, months) {
   return next;
 }
 
+function forecastStockoutDisplay(row) {
+  if (!row.stockout_date) return "";
+  const date = parseIsoDate(row.stockout_date);
+  const label = date
+    ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date)
+    : row.stockout_date;
+  const cause = row.stockout_product_name ? ` title="First shortage caused by ${escapeHtml(row.stockout_product_name)}"` : "";
+  return `<span class="stockout-date"${cause}>${escapeHtml(label)}</span>`;
+}
+
 function saturdayForWeek(weekStart) {
   const date = parseIsoDate(weekStart);
   if (!date) return null;
@@ -275,6 +285,7 @@ async function renderDashboard() {
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Scheduled Usage", numeric: true, value: (r) => qty(r.required_qty) },
     { label: "Current Inventory", numeric: true, value: (r) => forecastInventoryDisplay(r) },
+    { label: "Runs Out Week", value: (r) => forecastStockoutDisplay(r) },
     {
       label: "Deficit Qty",
       numeric: true,
@@ -1293,6 +1304,7 @@ function renderForecastTable(rows) {
       value: (r) => forecastRemainingDisplay(r),
       className: (r) => forecastRemainingValue(r) < 0 ? "shortage" : "",
     },
+    { label: "Runs Out Week", value: (r) => forecastStockoutDisplay(r) },
     {
       label: "Need to Order",
       numeric: true,
@@ -1483,6 +1495,7 @@ function printForecastReport(rows) {
       <td class="numeric">${qty(row.required_qty)}</td>
       <td class="numeric">${forecastInventoryDisplay(row)}</td>
       <td class="numeric ${forecastRemainingValue(row) < 0 ? "shortage" : ""}">${forecastRemainingDisplay(row)}</td>
+      <td>${forecastStockoutDisplay(row)}</td>
       <td class="numeric ${forecastNeededToOrderValue(row) > 0 ? "shortage" : ""}">${forecastNeededToOrderDisplay(row)}</td>
       <td>${forecastOrderUnitsDisplay(row)}</td>
       <td>${escapeHtml(row.quantity_uom)}</td>
@@ -1537,7 +1550,7 @@ function printForecastReport(rows) {
         ${rows.length ? `
           <table>
             <thead>
-              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Usage in Date Range</th><th class="numeric">Inventory At Start</th><th class="numeric">Remaining</th><th class="numeric">Need to Order</th><th>Purchase Units</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
+              <tr><th>Ingredient</th><th>Type</th><th class="numeric">Usage in Date Range</th><th class="numeric">Inventory At Start</th><th class="numeric">Remaining</th><th>Runs Out Week</th><th class="numeric">Need to Order</th><th>Purchase Units</th><th>UOM</th><th class="numeric">Batches</th><th>Products</th><th>First Week</th><th>Last Week</th></tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>

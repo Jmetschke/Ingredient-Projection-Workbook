@@ -1065,6 +1065,38 @@ async function scheduledIngredientUsageForecast(query = {}) {
       AND w.week_start <= @end
     ORDER BY w.week_start, i.name, p.name
   `, { start, end });
+  const depletionDetail = baselineStart === start ? detail : await all(`
+    SELECT w.week_start,
+           p.name AS product_name,
+           i.id AS ingredient_id,
+           COALESCE(pf.quantity_uom, 'grams') AS quantity_uom,
+           pb.quantity * COALESCE(pf.quantity_per_unit, 0) AS required_qty
+    FROM production_batches pb
+    JOIN weeks w ON w.id = pb.week_id
+    JOIN products p ON p.id = pb.product_id
+    JOIN product_formulas pf ON pf.product_id = pb.product_id AND pf.source_sheet IS NULL
+    JOIN ingredients i ON i.id = pf.ingredient_id
+    WHERE pb.quantity > 0
+      AND w.week_start >= @baselineStart
+      AND w.week_start <= @end
+    ORDER BY w.week_start, i.name, p.name, pb.id
+  `, { baselineStart, end });
+  const forecastRowByKey = new Map(rowsWithInventory.map((row) => [
+    `${row.ingredient_id}:${String(row.quantity_uom || "").toLowerCase()}`,
+    row,
+  ]));
+  const cumulativeUsageByKey = new Map();
+  for (const batch of depletionDetail) {
+    const key = `${batch.ingredient_id}:${String(batch.quantity_uom || "").toLowerCase()}`;
+    const forecastRow = forecastRowByKey.get(key);
+    if (!forecastRow || forecastRow.current_inventory_value == null || forecastRow.stockout_date) continue;
+    const cumulativeUsage = (cumulativeUsageByKey.get(key) || 0) + Number(batch.required_qty || 0);
+    cumulativeUsageByKey.set(key, cumulativeUsage);
+    if (Number(batch.required_qty || 0) > 0 && cumulativeUsage >= Number(forecastRow.current_inventory_value)) {
+      forecastRow.stockout_date = batch.week_start;
+      forecastRow.stockout_product_name = batch.product_name;
+    }
+  }
   return {
     filters: { weeks: weekCount, start, end, baseline_start: baselineStart },
     inventory_as_of: inventoryRows.reduce((latest, row) => {
@@ -1188,16 +1220,17 @@ function streamForecastPdf(res, report, rows, query = {}) {
   }
 
   const columns = [
-    { label: "Ingredient", width: 126 },
+    { label: "Ingredient", width: 115 },
     { label: "Type", width: 38 },
     { label: "Range Usage", width: 54, align: "right" },
     { label: "Inventory Start", width: 58, align: "right" },
     { label: "Remaining", width: 54, align: "right" },
+    { label: "Runs Out", width: 63 },
     { label: "Need to Order", width: 58, align: "right" },
-    { label: "Order Units", width: 74 },
+    { label: "Order Units", width: 65 },
     { label: "UOM", width: 40 },
     { label: "Batches", width: 42, align: "right" },
-    { label: "Products", width: 148 },
+    { label: "Products", width: 105 },
   ];
   writePdfTableRow(doc, columns, columns.map((column) => column.label), {
     bold: true,
@@ -1213,6 +1246,7 @@ function streamForecastPdf(res, report, rows, query = {}) {
       formatReportQty(row.required_qty),
       formatReportQty(forecastInventoryValue(row)),
       formatReportQty(remaining),
+      row.stockout_date || "",
       formatReportQty(forecastNeededToOrderValue(row)),
       row.order_units_needed == null ? "" : `${formatReportQty(row.order_units_needed)} ${row.order_unit_uom || "units"}`,
       row.quantity_uom,

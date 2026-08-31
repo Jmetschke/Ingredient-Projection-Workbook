@@ -377,14 +377,21 @@ th {
   font-weight: 700;
 }
 
-td:first-child, th:first-child {
+td:first-child,
+th:first-child {
   position: sticky;
   left: 0;
   z-index: 2;
-  background: inherit;
+  background-clip: padding-box;
+  box-shadow: 2px 0 3px rgba(23, 32, 38, 0.14);
+}
+
+td:first-child {
+  background-color: #fff;
 }
 
 th:first-child {
+  background-color: #edf2f3;
   z-index: 3;
 }
 
@@ -931,7 +938,7 @@ tr.warning td {
 }
 
 #forecast-table table {
-  min-width: 1380px;
+  min-width: 1490px;
   table-layout: fixed;
   width: 100%;
 }
@@ -970,39 +977,50 @@ tr.warning td {
 
 #forecast-table th:nth-child(6),
 #forecast-table td:nth-child(6) {
-  width: 120px;
+  width: 110px;
 }
 
 #forecast-table th:nth-child(7),
 #forecast-table td:nth-child(7) {
-  width: 150px;
+  width: 120px;
 }
 
 #forecast-table th:nth-child(8),
 #forecast-table td:nth-child(8) {
-  width: 85px;
+  width: 150px;
 }
 
 #forecast-table th:nth-child(9),
 #forecast-table td:nth-child(9) {
-  width: 80px;
+  width: 85px;
 }
 
 #forecast-table th:nth-child(10),
 #forecast-table td:nth-child(10) {
-  width: 210px;
+  width: 80px;
 }
 
 #forecast-table th:nth-child(11),
-#forecast-table td:nth-child(11),
+#forecast-table td:nth-child(11) {
+  width: 210px;
+}
+
 #forecast-table th:nth-child(12),
-#forecast-table td:nth-child(12) {
+#forecast-table td:nth-child(12),
+#forecast-table th:nth-child(13),
+#forecast-table td:nth-child(13) {
   width: 100px;
 }
 
-#forecast-table td:first-child,
-#forecast-table th:first-child {
-  position: static;
+.stockout-date {
+  background: var(--warn-bg);
+  border: 1px solid #e2bd55;
+  border-radius: 999px;
+  color: #704700;
+  display: inline-block;
+  font-weight: 800;
+  padding: 3px 7px;
+  white-space: nowrap;
 }
 
 #forecast-table .numeric {
@@ -1934,6 +1952,12 @@ pre {
 
   #forecast-table .table-wrap td::before {
     content: none;
+  }
+
+  #forecast-table .table-wrap th:first-child,
+  #forecast-table .table-wrap td:first-child {
+    left: 0;
+    position: sticky;
   }
 
   .velocity-schedule-table {
