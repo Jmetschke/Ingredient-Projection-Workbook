@@ -66,6 +66,7 @@ const titles = {
   velocity: ["Velocity Calculator", "Project production batch quantities from units sold per day."],
   "batch-ingredient-qty": ["Batch Ingredient QTY", "Calculate ingredients needed for a specific quantity of finished pieces."],
   forecast: ["Ingredient Forecast", "Scheduled BOM usage totals from Production Planner batches."],
+  "inventory-mapping": ["Inventory Mapping", "Review and correct inventory matches and package weights."],
   inventory: ["Inventory", "Add new items to the master inventory list."],
   formulas: ["Formula Manager", "Batch-level BOM setup using grams and each."],
 };
@@ -1449,6 +1450,92 @@ function renderForecastSummary(rows) {
   `;
 }
 
+async function renderInventoryMapping() {
+  const host = document.querySelector("#inventory-mapping-table");
+  const form = document.querySelector("#inventory-mapping-editor");
+  form.hidden = true;
+  try {
+    const data = await api("/api/inventory-upload");
+    const ingredients = state.ingredients.filter((item) => Number(item.is_master) && Number(item.active) !== 0);
+    const format = (value) => Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
+    const draw = () => {
+      const search = document.querySelector("#inventory-mapping-filter").value.toLowerCase();
+      const rows = data.rows.filter((row) => `${row.uploaded_name} ${row.ingredient_name}`.toLowerCase().includes(search));
+      host.innerHTML = !data.rows.length ? '<div class="empty">Upload an inventory PDF from Ingredient Forecast to review its mappings here.</div>' : table([
+        { label: "Uploaded item", value: (row) => escapeHtml(row.uploaded_name) },
+        { label: "Matched ingredient", value: (row) => escapeHtml(row.ingredient_name || "Unmatched") },
+        { label: "Match", value: (row) => escapeHtml(row.match_method) },
+        { label: "Inventory qty", value: (row) => format(row.current_qty), numeric: true },
+        { label: "Package / unit", value: (row) => escapeHtml(row.inventory_uom || "") },
+        { label: "Grams per package", value: (row) => row.grams_per_inventory_unit == null ? "—" : format(row.grams_per_inventory_unit), numeric: true },
+        { label: "Total inventory", value: (row) => row.quantity_uom === "each" ? `${format(row.current_qty)} each` : row.current_qty_grams == null ? "Conversion needed" : `${format(row.current_qty_grams)} g`, numeric: true },
+        { label: "Weight source", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Manual inventory" : row.unit_override ? "Saved correction" : "App default — review" },
+        { label: "Action", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Edit in Ingredient Forecast" : `<button type="button" class="small" data-edit-mapping="${row.id}">Edit</button>` },
+      ], rows);
+      host.querySelectorAll("[data-edit-mapping]").forEach((button) => {
+        button.onclick = () => edit(data.rows.find((row) => String(row.id) === button.dataset.editMapping));
+      });
+    };
+    const edit = (row) => {
+      const fields = form.elements;
+      form.hidden = false;
+      document.querySelector("#inventory-mapping-name").textContent = row.uploaded_name;
+      fields.ingredient_id.innerHTML = '<option value="">Select ingredient…</option>' + ingredients.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
+      fields.ingredient_id.value = row.ingredient_id || "";
+      fields.current_qty.value = row.current_qty;
+      fields.inventory_uom.value = row.inventory_uom || "";
+      fields.package_weight.value = row.unit_override?.package_weight || row.grams_per_inventory_unit || "";
+      fields.weight_unit.value = row.unit_override?.weight_unit || "g";
+      document.querySelector("#inventory-mapping-prefill").textContent = row.unit_override
+        ? "Pre-filled with your saved package size. You can change it below."
+        : row.grams_per_inventory_unit === 1
+          ? "The app currently assumes this item is measured in individual grams. This is not a verified package size. If your quantity is boxes, bags, or jars, enter the weight of one package below."
+          : row.grams_per_inventory_unit > 0
+            ? "Pre-filled with the app’s existing unit size, expressed in grams. Review it and adjust the label, weight, or weight unit as needed."
+            : row.quantity_uom === "each"
+              ? "This item is counted as each and does not require a gram weight."
+              : "No unit size is known for this item. Enter the package label and weight of one package below.";
+      const update = () => {
+        const ingredient = ingredients.find((item) => String(item.id) === fields.ingredient_id.value);
+        const isEach = (ingredient?.bom_uom || ingredient?.purchase_uom || row.quantity_uom) === "each";
+        form.querySelectorAll(".mapping-weight").forEach((label) => { label.hidden = isEach; });
+        fields.package_weight.required = !isEach;
+        fields.inventory_uom.required = !isEach;
+        fields.package_weight.disabled = isEach;
+        fields.inventory_uom.disabled = isEach;
+        fields.weight_unit.disabled = isEach;
+        document.querySelector("#mapping-quantity-label").textContent = isEach ? "Inventory quantity (each)" : "Inventory quantity (packages or units)";
+        const factor = { g: 1, kg: 1000, lb: 453.59237, oz: 28.349523125 }[fields.weight_unit.value];
+        const grams = Number(fields.package_weight.value) * factor;
+        document.querySelector("#inventory-mapping-preview").textContent = isEach
+          ? `${format(fields.current_qty.value)} each`
+          : grams > 0 && Number.isFinite(grams * Number(fields.current_qty.value))
+            ? `${format(fields.current_qty.value)} × ${format(grams)} g per unit = ${format(Number(fields.current_qty.value) * grams)} g total`
+            : "Enter the weight of one package to calculate total grams.";
+      };
+      form.oninput = update;
+      fields.ingredient_id.onchange = update;
+      update();
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('[type="submit"]');
+        button.disabled = true;
+        try {
+          await api(`/api/inventory-upload/${row.id}/map`, { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+          await renderInventoryMapping();
+          setMessage("#inventory-mapping-message", `${row.uploaded_name} saved. Forecasts now use the corrected inventory. The match and package weight will be remembered for future uploads.`, "success");
+        } catch (error) {
+          setMessage("#inventory-mapping-message", error.message, "error");
+        } finally { button.disabled = false; }
+      };
+      form.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
+    document.querySelector("#inventory-mapping-filter").oninput = draw;
+    document.querySelector("#inventory-mapping-cancel").onclick = () => { form.hidden = true; };
+    draw();
+  } catch (error) { setMessage("#inventory-mapping-message", error.message, "error"); }
+}
+
 function renderForecastUnmatchedInventory() {
   const host = document.querySelector("#forecast-unmatched-inventory");
   const rows = state.forecastUnmatchedInventoryRows || [];
@@ -2569,6 +2656,7 @@ const renderers = {
   "batch-ingredient-qty": renderBatchIngredientQty,
   forecast: renderForecast,
   inventory: renderInventory,
+  "inventory-mapping": renderInventoryMapping,
   formulas: renderFormulas,
 };
 

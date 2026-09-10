@@ -10,6 +10,7 @@ import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-cale
 import { BATCH_TYPES, PRODUCT_ALIASES, VELOCITY_BATCH_UNIT_MULTIPLIERS } from "./src/master-products.js";
 import { bomUomForIngredient } from "./src/master-ingredients.js";
 import { INGREDIENT_UNIT_CONVERSION_BY_NAME } from "./src/ingredient-unit-conversions.js";
+import { inventoryWeightConversion } from "./src/inventory-mapping.js";
 
 dotenv.config();
 
@@ -326,10 +327,10 @@ function inventoryConversionForName(name) {
   return INGREDIENT_UNIT_CONVERSION_BY_NAME.get(String(name || "").trim().toLowerCase()) || null;
 }
 
-function withInventoryConversion(row, matchedName = "") {
-  const conversion = inventoryConversionForName(matchedName) || inventoryConversionForName(row.uploaded_name);
+function withInventoryConversion(row, matchedName = "", override = null) {
+  const conversion = override || inventoryConversionForName(matchedName) || inventoryConversionForName(row.uploaded_name);
   const gramsPerInventoryUnit = Number(conversion?.grams_per_inventory_unit);
-  const hasGramConversion = Number.isFinite(gramsPerInventoryUnit) && gramsPerInventoryUnit > 0;
+  const hasGramConversion = row.quantity_uom !== "each" && Number.isFinite(gramsPerInventoryUnit) && gramsPerInventoryUnit > 0;
   const eachPerInventoryUnit = Number(conversion?.each_per_inventory_unit);
   const hasEachConversion = Number.isFinite(eachPerInventoryUnit) && eachPerInventoryUnit > 0;
   const alreadyConvertedEach = hasEachConversion
@@ -449,7 +450,7 @@ function scoreIngredientMatch(uploadName, ingredientName) {
   return intersection / union;
 }
 
-function matchInventoryRows(rows, ingredients, aliasIngredients = new Map()) {
+function matchInventoryRows(rows, ingredients, aliasIngredients = new Map(), unitOverrides = new Map()) {
   return rows.map((row) => {
     const aliasIngredient = aliasIngredients.get(normalizeMatchText(row.uploaded_name));
     const scored = ingredients
@@ -469,7 +470,9 @@ function matchInventoryRows(rows, ingredients, aliasIngredients = new Map()) {
       match_method: match?.method || "unmatched",
       quantity_uom: match?.ingredient.purchase_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
     };
-    return withInventoryConversion(matchedRow, match?.ingredient.name);
+    const override = unitOverrides.get(normalizeMatchText(row.uploaded_name));
+    return withInventoryConversion(matchedRow, match?.ingredient.name,
+      override?.ingredient_id === matchedRow.ingredient_id && matchedRow.quantity_uom !== "each" ? override : null);
   });
 }
 
@@ -558,6 +561,11 @@ async function inventoryAliasIngredients() {
   return new Map(rows.map((row) => [row.normalized_alias, withBomUom(row)]));
 }
 
+async function inventoryUnitOverrides() {
+  const rows = await all("SELECT * FROM inventory_unit_overrides");
+  return new Map(rows.map((row) => [row.normalized_alias, row]));
+}
+
 async function replaceLatestInventoryRows(rows) {
   await run("DELETE FROM latest_inventory_rows");
   for (const row of rows) {
@@ -584,14 +592,15 @@ async function replaceLatestInventoryRows(rows) {
 }
 
 async function rematchLatestInventoryRows() {
-  const rawRows = (await latestInventoryRows()).map((row) => ({
+  const existingRows = await latestInventoryRows();
+  const rawRows = existingRows.filter((row) => !String(row.match_method || "").startsWith("manual_")).map((row) => ({
     uploaded_name: row.uploaded_name,
     current_qty: row.current_qty,
     quantity_uom: row.quantity_uom || guessInventoryUom(row.uploaded_name),
     inventory_uom: row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
   }));
-  const matched = matchInventoryRows(rawRows, await activeMasterIngredients(), await inventoryAliasIngredients());
-  await replaceLatestInventoryRows(matched);
+  const matched = matchInventoryRows(rawRows, await activeMasterIngredients(), await inventoryAliasIngredients(), await inventoryUnitOverrides());
+  await replaceLatestInventoryRows([...matched, ...existingRows.filter((row) => String(row.match_method || "").startsWith("manual_"))]);
   return latestInventoryRows();
 }
 
@@ -1011,7 +1020,9 @@ async function scheduledIngredientUsageForecast(query = {}) {
       order_units_needed: neededToOrderQty == null || !hasOrderConversion
         ? null
         : Math.ceil(neededToOrderQty / unitsPerOrderUnit),
-      order_unit_uom: conversion?.inventory_uom || inventory?.inventory_uom || "",
+      order_unit_uom: inventory?.match_method === "alias"
+        ? inventory.inventory_uom || conversion?.inventory_uom || ""
+        : conversion?.inventory_uom || inventory?.inventory_uom || "",
       current_inventory_uom: isEach ? "each" : "grams",
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
       inventory_source_uom: inventory?.inventory_uom || "",
@@ -1676,8 +1687,12 @@ app.get("/api/export/forecast.pdf", async (req, res) => {
 
 app.get("/api/inventory-upload", async (req, res) => {
   try {
+    const overrides = await inventoryUnitOverrides();
     ok(res, {
-      rows: await latestInventoryRows(),
+      rows: (await latestInventoryRows()).map((row) => {
+        const override = overrides.get(normalizeMatchText(row.uploaded_name));
+        return { ...row, unit_override: row.match_method === "alias" && override?.ingredient_id === row.ingredient_id ? override : null };
+      }),
     });
   } catch (error) {
     fail(res, error);
@@ -1826,7 +1841,7 @@ app.post("/api/inventory-upload", express.raw({ type: ["application/pdf", "appli
     if (!buffer.length) return fail(res, new Error("Upload a PDF inventory valuation report."), 400);
     const parsedRows = rowsFromDistruInventoryPdf(buffer);
     if (!parsedRows.length) return fail(res, new Error("No inventory rows were found in that PDF."), 400);
-    const matchedRows = matchInventoryRows(parsedRows, await activeMasterIngredients(), await inventoryAliasIngredients());
+    const matchedRows = matchInventoryRows(parsedRows, await activeMasterIngredients(), await inventoryAliasIngredients(), await inventoryUnitOverrides());
     await replaceLatestInventoryRows(matchedRows);
     const savedRows = await latestInventoryRows();
     ok(res, {
@@ -1867,15 +1882,32 @@ app.post("/api/inventory-upload/:id/map", async (req, res) => {
     const normalizedAlias = normalizeMatchText(row.uploaded_name);
     if (!normalizedAlias) return fail(res, new Error("Uploaded item name cannot be used as an alias"), 400);
     const ingredient = withBomUom(ingredientRow);
+    const hasWeight = req.body.package_weight !== undefined;
+    let override = (await inventoryUnitOverrides()).get(normalizedAlias);
+    if (override?.ingredient_id !== ingredient.id) override = null;
+    if (hasWeight) {
+      if (ingredient.purchase_uom === "each") return fail(res, new Error("Items used as each do not use a gram weight."), 400);
+      try { override = inventoryWeightConversion(req.body); }
+      catch (error) { return fail(res, error, 400); }
+    }
+    const correctedQty = req.body.current_qty === undefined ? Number(row.current_qty) : Number(req.body.current_qty);
+    if (!Number.isFinite(correctedQty) || (req.body.current_qty !== undefined && String(req.body.current_qty).trim() === "")) {
+      return fail(res, new Error("Enter a valid inventory quantity."), 400);
+    }
     const mapped = withInventoryConversion({
       ...row,
+      current_qty: correctedQty,
+      inventory_uom: req.body.current_qty !== undefined && ingredient.purchase_uom === "each"
+        ? inventoryConversionForName(ingredient.name)?.inventory_uom || "Unit"
+        : row.inventory_uom,
       ingredient_id: ingredient.id,
       ingredient_name: ingredient.name,
       ingredient_type: ingredient.ingredient_type,
       match_score: 1,
       match_method: "alias",
       quantity_uom: ingredient.purchase_uom || row.quantity_uom,
-    }, ingredient.name);
+    }, ingredient.name, override);
+    if (mapped.current_qty_grams != null && !Number.isFinite(mapped.current_qty_grams)) return fail(res, new Error("Converted inventory is too large."), 400);
     await withTransaction(async (tx) => {
       await tx.run(`
         INSERT INTO inventory_ingredient_aliases (alias, normalized_alias, ingredient_id, updated_at)
@@ -1885,12 +1917,26 @@ app.post("/api/inventory-upload/:id/map", async (req, res) => {
           ingredient_id = excluded.ingredient_id,
           updated_at = CURRENT_TIMESTAMP
       `, [row.uploaded_name, normalizedAlias, ingredient.id]);
+      if (hasWeight) {
+        await tx.run(`
+          INSERT INTO inventory_unit_overrides
+            (normalized_alias, ingredient_id, inventory_uom, package_weight, weight_unit, grams_per_inventory_unit)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(normalized_alias) DO UPDATE SET
+            ingredient_id = excluded.ingredient_id, inventory_uom = excluded.inventory_uom,
+            package_weight = excluded.package_weight, weight_unit = excluded.weight_unit,
+            grams_per_inventory_unit = excluded.grams_per_inventory_unit
+        `, [normalizedAlias, ingredient.id, override.inventory_uom, override.package_weight, override.weight_unit, override.grams_per_inventory_unit]);
+      } else if (!override || ingredient.purchase_uom === "each") {
+        await tx.run("DELETE FROM inventory_unit_overrides WHERE normalized_alias = ?", [normalizedAlias]);
+      }
       await tx.run(`
         UPDATE latest_inventory_rows
-        SET quantity_uom = ?, inventory_uom = ?, grams_per_inventory_unit = ?, current_qty_grams = ?,
+        SET current_qty = ?, quantity_uom = ?, inventory_uom = ?, grams_per_inventory_unit = ?, current_qty_grams = ?,
             ingredient_id = ?, ingredient_name = ?, ingredient_type = ?, match_score = 1, match_method = 'alias'
         WHERE id = ?
       `, [
+        mapped.current_qty,
         mapped.quantity_uom,
         mapped.inventory_uom,
         mapped.grams_per_inventory_unit ?? null,

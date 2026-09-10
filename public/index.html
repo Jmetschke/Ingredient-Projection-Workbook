@@ -46,6 +46,7 @@
         <button data-tab="batch-ingredient-qty">Batch Ingredient QTY</button>
         <button data-tab="forecast">Ingredient Forecast</button>
         <button data-tab="inventory">Inventory</button>
+        <button data-tab="inventory-mapping">Inventory Mapping</button>
         <button data-tab="formulas">Formula Manager</button>
       </nav>
     </aside>
@@ -398,6 +399,29 @@
           </div>
           <div id="batch-ingredient-table"></div>
         </div>
+      </section>
+
+      <section id="inventory-mapping" class="view">
+        <div class="section-head"><h2>Inventory Mapping</h2></div>
+        <p>Review every uploaded item, including automatic matches. Edit an item to correct its ingredient, inventory quantity, or package weight. Saved matches and weights apply to future uploads of that item; quantity corrections apply to the current inventory only.</p>
+        <p class="source-note">Known unit sizes are pre-filled when you choose Edit. Enter any missing size manually using the package label, weight, and weight unit fields. Saved sizes will be filled in on future uploads.</p>
+        <label>Find uploaded item or ingredient <input id="inventory-mapping-filter" type="search" placeholder="Search, e.g. bees wax"></label>
+        <div id="inventory-mapping-message" class="source-note" role="status"></div>
+        <form id="inventory-mapping-editor" class="mapping-editor" hidden>
+          <h3 id="inventory-mapping-name"></h3>
+          <p id="inventory-mapping-prefill" class="source-note"></p>
+          <div class="mapping-fields">
+            <label>Match to ingredient <select name="ingredient_id" required></select></label>
+            <label><span id="mapping-quantity-label">Inventory quantity (packages or units)</span><input name="current_qty" type="number" step="any" required></label>
+            <label class="mapping-weight">Package / unit label <input name="inventory_uom" maxlength="100" placeholder="Box, bag, jar, gram…"></label>
+            <label class="mapping-weight">Weight of one package / unit <input name="package_weight" type="number" min="0.000000001" step="any"></label>
+            <label class="mapping-weight">Weight unit <select name="weight_unit"><option value="g">Grams (g)</option><option value="kg">Kilograms (kg)</option><option value="lb">Pounds (lb)</option><option value="oz">Ounces (oz)</option></select></label>
+          </div>
+          <p id="inventory-mapping-preview" aria-live="polite"></p>
+          <button type="submit">Save &amp; Remember</button>
+          <button id="inventory-mapping-cancel" type="button">Cancel</button>
+        </form>
+        <div id="inventory-mapping-table"></div>
       </section>
 
       <section id="inventory" class="view">

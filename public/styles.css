@@ -1992,3 +1992,9 @@ pre {
     text-align: left;
   }
 }
+
+.mapping-editor { margin: 20px 0; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: #f7faf8; }
+.mapping-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.mapping-fields label { display: flex; flex-direction: column; gap: 6px; }
+.mapping-fields label[hidden], .mapping-editor[hidden] { display: none; }
+#inventory-mapping-preview { font-weight: 600; }

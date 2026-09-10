@@ -164,3 +164,12 @@ CREATE INDEX IF NOT EXISTS idx_formula_product ON product_formulas(product_id);
 CREATE INDEX IF NOT EXISTS idx_formula_ingredient ON product_formulas(ingredient_id);
 CREATE INDEX IF NOT EXISTS idx_receipts_week ON received_inventory(week_id);
 CREATE INDEX IF NOT EXISTS idx_po_week ON purchase_orders(order_week_id);
+
+CREATE TABLE IF NOT EXISTS inventory_unit_overrides (
+  normalized_alias TEXT PRIMARY KEY,
+  ingredient_id INTEGER NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
+  inventory_uom TEXT NOT NULL,
+  package_weight REAL NOT NULL CHECK (package_weight > 0),
+  weight_unit TEXT NOT NULL CHECK (weight_unit IN ('g', 'kg', 'lb', 'oz')),
+  grams_per_inventory_unit REAL NOT NULL CHECK (grams_per_inventory_unit > 0)
+);

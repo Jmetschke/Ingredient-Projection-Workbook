@@ -32,6 +32,14 @@ DATABASE_PATH=./data/planning.db
 
 The schema is created automatically on startup. Production schedules, BOMs, and ingredient projections are driven by app data entered through the planner, formula manager, and inventory screens.
 
+## Inventory mapping and package weights
+
+After uploading a valuation PDF in Ingredient Forecast, open **Inventory Mapping** to review all uploaded items, including automatic matches. Search for an item and choose **Edit** to change its matched ingredient, current quantity, package label, and weight per package in g, kg, lb, or oz. The editor previews the resulting grams before **Save & Remember** updates the inventory used by forecasts.
+
+Matches and package weights are remembered by uploaded item name for future uploads and rematches. Quantity corrections affect the current inventory only. Items measured as each retain count quantities; manual inventory entries are edited in Ingredient Forecast. The Weight source column distinguishes app defaults from saved corrections. A package weight must be entered when the PDF does not provide one; the September 10, 2026 valuation export lists quantities and values without unit sizes.
+
+Run conversion regression tests with `node --test test/inventory-mapping.test.js`.
+
 ## Manual inventory audit entries
 
 The Ingredient Forecast tab includes a manual inventory form with mutually exclusive **Add to Current QTY** and **Update / Override QTY** fields. Add increases the ingredient's current balance. Update replaces the existing balance, including uploaded inventory data for that ingredient, and the result becomes the beginning quantity used by future forecast deductions. Every manual entry records its previous and resulting quantities in `manual_inventory_adjustments`.
