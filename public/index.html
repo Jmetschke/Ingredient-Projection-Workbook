@@ -45,6 +45,7 @@
         <button data-tab="velocity">Velocity Calculator</button>
         <button data-tab="batch-ingredient-qty">Batch Ingredient QTY</button>
         <button data-tab="forecast">Ingredient Forecast</button>
+        <button data-tab="shortage-report">Shortage Report</button>
         <button data-tab="inventory">Inventory</button>
         <button data-tab="inventory-mapping">Inventory Mapping</button>
         <button data-tab="formulas">Formula Manager</button>
@@ -129,6 +130,23 @@
           </div>
           <div id="dashboard-production-calendar"></div>
         </section>
+      </section>
+
+      <section id="shortage-report" class="view">
+        <div class="section-head">
+          <div>
+            <h2>Ingredient Shortage Report</h2>
+            <span>Ingredients projected to go negative, ordered by earliest runout</span>
+          </div>
+          <div class="shortage-report-actions">
+            <button id="shortage-report-settings" class="secondary" type="button">Edit Forecast Settings</button>
+            <button id="shortage-report-refresh" class="secondary" type="button">Refresh Report</button>
+            <button id="shortage-report-print" type="button">Print Report</button>
+          </div>
+        </div>
+        <div id="shortage-report-stats" class="forecast-summary"></div>
+        <div id="shortage-report-message" class="source-note"></div>
+        <div id="shortage-report-table"></div>
       </section>
 
       <section id="production" class="view">

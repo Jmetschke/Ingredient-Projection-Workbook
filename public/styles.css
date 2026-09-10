@@ -1055,6 +1055,13 @@ tr.warning td {
   border-color: #e2a39d;
 }
 
+.shortage-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .shortage-text {
   color: var(--danger) !important;
   font-weight: 700;

@@ -61,6 +61,7 @@ try {
 
 const titles = {
   dashboard: ["Dashboard", "Inventory warnings, upcoming production, and purchase timing."],
+  "shortage-report": ["Shortage Report", "Review projected ingredient shortages from earliest to latest runout."],
   production: ["Production Planner", "Schedule batches and calculate ingredient needs from calendar entries."],
   "rl-scheduled-batches": ["RL Scheduled Batches", "Read-only calendar from the RL scheduling database."],
   velocity: ["Velocity Calculator", "Project production batch quantities from units sold per day."],
@@ -290,6 +291,7 @@ async function renderDashboard() {
     end: data.ingredientUsage?.filters?.end || "",
     search: "All ingredients",
     ingredientType: "All types",
+    globalFilter: "Not applied",
     inventoryAsOf,
   });
   document.querySelector("#dashboard-ingredient-usage").innerHTML = table([
@@ -383,19 +385,23 @@ function printDashboardInventory(rows, inventoryAsOf) {
   printWindow.document.close();
 }
 
-function printIngredientShortageReport(rows, context) {
-  const printWindow = window.open("", "_blank", "width=950,height=850");
-  if (!printWindow) {
-    alert("Allow pop-ups to print the ingredient shortage report.");
-    return;
-  }
-  const shortages = rows
+function ingredientShortageRows(rows) {
+  return rows
     .filter((row) => forecastRemainingValue(row) < 0)
     .sort((a, b) => {
       const aDate = a.stockout_date || "9999-12-31";
       const bDate = b.stockout_date || "9999-12-31";
       return aDate.localeCompare(bDate) || String(a.ingredient_name || "").localeCompare(String(b.ingredient_name || ""));
     });
+}
+
+function printIngredientShortageReport(rows, context) {
+  const printWindow = window.open("", "_blank", "width=950,height=850");
+  if (!printWindow) {
+    alert("Allow pop-ups to print the ingredient shortage report.");
+    return;
+  }
+  const shortages = ingredientShortageRows(rows);
   const reportRows = shortages.map((row) => `
     <tr>
       <td>${escapeHtml(row.ingredient_name)}</td>
@@ -411,6 +417,7 @@ function printIngredientShortageReport(rows, context) {
     ["Date range", `${context.start || "—"} through ${context.end || "—"}`],
     ["Ingredient search", context.search || "All ingredients"],
     ["Item type", context.ingredientType || "All types"],
+    ["Global row filter", context.globalFilter || "None"],
     ["Inventory snapshot", formatInventoryAsOf(context.inventoryAsOf)],
     ["Generated", new Date().toLocaleString()],
   ];
@@ -458,6 +465,69 @@ function printIngredientShortageReport(rows, context) {
     </html>
   `);
   printWindow.document.close();
+}
+
+async function renderShortageReport() {
+  const data = await api(`/api/forecast${forecastReportQuery()}`);
+  state.forecastWeeks = data.filters.weeks || state.forecastWeeks;
+  state.forecastStart = data.filters.start || state.forecastStart;
+  state.forecastEnd = data.filters.end || state.forecastEnd;
+  state.forecastInventoryAsOf = data.inventory_as_of || "";
+  const sourceRows = data.rows || [];
+  const filtered = forecastFilteredRows(sourceRows);
+  const shortages = ingredientShortageRows(filtered);
+  const context = {
+    source: "Shortage Report",
+    weeks: state.forecastWeeks,
+    start: state.forecastStart,
+    end: state.forecastEnd,
+    search: state.forecastFilter || "All ingredients",
+    ingredientType: state.forecastIngredientType || "All types",
+    globalFilter: state.filter || "None",
+    inventoryAsOf: state.forecastInventoryAsOf,
+  };
+  document.querySelector("#shortage-report-stats").innerHTML = `
+    <div class="forecast-summary-card warning-card">
+      <span>Projected Shortages</span>
+      <strong>${shortages.length}</strong>
+      <em>Only negative ingredients are listed</em>
+    </div>
+    <div class="forecast-summary-card">
+      <span>Forecast Length</span>
+      <strong>${state.forecastWeeks} week${state.forecastWeeks === 1 ? "" : "s"}</strong>
+      <em>${escapeHtml(state.forecastStart)} through ${escapeHtml(state.forecastEnd)}</em>
+    </div>
+    <div class="forecast-summary-card">
+      <span>Report Filters</span>
+      <strong>${escapeHtml(state.forecastIngredientType || "All types")}</strong>
+      <em>Search: ${escapeHtml(state.forecastFilter || "All ingredients")} · Global: ${escapeHtml(state.filter || "None")}</em>
+    </div>
+    <div class="forecast-summary-card">
+      <span>Inventory Snapshot</span>
+      <strong>${escapeHtml(formatInventoryAsOf(state.forecastInventoryAsOf))}</strong>
+      <em>Current inventory baseline</em>
+    </div>
+  `;
+  document.querySelector("#shortage-report-message").textContent = shortages.length
+    ? "Ordered by runout week from soonest to latest. Red quantities are the projected amount below zero."
+    : "No ingredients are projected to go negative with the current forecast settings.";
+  document.querySelector("#shortage-report-table").innerHTML = table([
+    { label: "Ingredient", key: "ingredient_name" },
+    { label: "Runs Out Week", value: (row) => forecastStockoutDisplay(row) },
+    { label: "Triggering Batch", value: (row) => escapeHtml(row.stockout_product_name || "—") },
+    {
+      label: "Projected Negative Qty",
+      numeric: true,
+      value: (row) => qty(forecastRemainingValue(row)),
+      className: () => "shortage",
+    },
+    { label: "UOM", key: "quantity_uom" },
+    { label: "Inventory At Start", numeric: true, value: (row) => forecastInventoryDisplay(row) },
+    { label: "Usage in Date Range", numeric: true, value: (row) => qty(row.required_qty) },
+  ], shortages);
+  document.querySelector("#shortage-report-settings").onclick = () => activate("forecast");
+  document.querySelector("#shortage-report-refresh").onclick = () => renderShortageReport();
+  document.querySelector("#shortage-report-print").onclick = () => printIngredientShortageReport(filtered, context);
 }
 
 function renderDashboardProductionCalendar(batches, weeks) {
@@ -1307,6 +1377,7 @@ async function renderForecast() {
       end: state.forecastEnd,
       search: state.forecastFilter || "All ingredients",
       ingredientType: state.forecastIngredientType || "All types",
+      globalFilter: state.filter || "None",
       inventoryAsOf: state.forecastInventoryAsOf,
     });
   };
@@ -2650,6 +2721,7 @@ function renderFormulaEditor(formulas) {
 
 const renderers = {
   dashboard: renderDashboard,
+  "shortage-report": renderShortageReport,
   production: renderProduction,
   "rl-scheduled-batches": renderRlScheduledBatches,
   velocity: renderVelocity,
