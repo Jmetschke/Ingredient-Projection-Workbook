@@ -527,11 +527,12 @@
             </form>
             <div class="bom-transfer-panel">
               <div>
-                <h3>Transfer BOM Between Services</h3>
-                <p>Export the selected BOM here, then import the downloaded file in the other service.</p>
+                <h3>Export Formula or Transfer BOM</h3>
+                <p>Download a readable formula PDF, or export a BOM transfer file to import in another service. Exports use saved formula amounts.</p>
               </div>
               <div class="bom-transfer-actions">
-                <button id="formula-export-bom" type="button">Export Selected BOM</button>
+                <button id="formula-export-bom" type="button">for bom tranfer</button>
+                <button id="formula-export-pdf" type="button" disabled>Export Formula PDF</button>
                 <label class="file-action">
                   <span>Import BOM File</span>
                   <input id="formula-import-bom" type="file" accept="application/json,.json">

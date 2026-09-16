@@ -2187,7 +2187,7 @@ app.get("/api/formulas", async (req, res) => {
   }
 });
 
-app.get("/api/formulas/export/:productId", async (req, res) => {
+app.get(["/api/formulas/export/:productId", "/api/formulas/export/:productId/pdf"], async (req, res) => {
   try {
     const product = await one(`
       SELECT p.id, p.name, p.sku, p.category, pbs.batch_size
@@ -2196,7 +2196,8 @@ app.get("/api/formulas/export/:productId", async (req, res) => {
       WHERE p.id = ? AND p.active = 1 AND p.category IN ('Hijnx', 'Snackbar')
     `, [req.params.productId]);
     if (!product) return fail(res, new Error("Production batch not found"), 404);
-    if (!(Number(product.batch_size) > 0)) {
+    const isPdf = req.path.endsWith("/pdf");
+    if (!isPdf && !(Number(product.batch_size) > 0)) {
       return fail(res, new Error("Set a Batch QTY before exporting this BOM"), 400);
     }
     const ingredients = await all(`
@@ -2212,6 +2213,44 @@ app.get("/api/formulas/export/:productId", async (req, res) => {
       ORDER BY i.name
     `, [product.id]);
     if (!ingredients.length) return fail(res, new Error("This production batch does not have a BOM to export"), 400);
+    if (isPdf) {
+      const filename = product.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "formula";
+      const doc = new PDFDocument({ size: "LETTER", margin: 44 });
+      const hasBatchSize = Number(product.batch_size) > 0;
+      const amount = (value) => Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}-formula.pdf"`);
+      res.setHeader("Cache-Control", "no-store");
+      doc.pipe(res);
+      doc.font("Helvetica-Bold").fontSize(20).text("Formula Ingredients");
+      doc.moveDown(0.4);
+      doc.fontSize(14).text(product.name);
+      doc.font("Helvetica").fontSize(10)
+        .text(`Category: ${product.category}`)
+        .text(`Batch QTY: ${hasBatchSize ? amount(product.batch_size) : "Not set"}`)
+        .text("Amounts per unit are from the saved formula.");
+      doc.moveDown(0.8);
+      const columns = [{ width: 264 }, { width: 95, align: "right" }, { width: 95, align: "right" }, { width: 70 }];
+      const header = () => writePdfTableRow(doc, columns, ["Ingredient", "Amount / Unit", "Batch Amount", "UOM"], {
+        bold: true, fill: "#eef3f2", fontSize: 10, minHeight: 26,
+      });
+      header();
+      for (const ingredient of ingredients) {
+        const values = [ingredient.name, amount(ingredient.quantity_per_unit),
+          hasBatchSize ? amount(Number(ingredient.quantity_per_unit) * Number(product.batch_size)) : "Not set",
+          ingredient.quantity_uom];
+        doc.font("Helvetica").fontSize(10);
+        const height = Math.max(26, ...columns.map((column, index) => doc.heightOfString(String(values[index] ?? ""), { width: column.width - 8 }) + 8));
+        if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
+          doc.addPage();
+          header();
+        }
+        doc.font("Helvetica").fontSize(10);
+        writePdfTableRow(doc, columns, values, { fontSize: 10, minHeight: 26 });
+      }
+      doc.end();
+      return;
+    }
     const transfer = {
       format: BOM_TRANSFER_FORMAT,
       version: BOM_TRANSFER_VERSION,
@@ -2243,7 +2282,8 @@ app.get("/api/formulas/export/:productId", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.send(`${JSON.stringify(transfer, null, 2)}\n`);
   } catch (error) {
-    fail(res, error);
+    if (!res.headersSent) fail(res, error);
+    else res.end();
   }
 });
 

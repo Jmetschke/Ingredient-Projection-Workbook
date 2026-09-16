@@ -2597,6 +2597,9 @@ async function refreshFormulaManager() {
   const exportButton = document.querySelector("#formula-export-bom");
   exportButton.dataset.productId = selectedProduct?.id || "";
   exportButton.disabled = !selectedProduct || !selectedFormulas.length || !(Number(selectedProduct.batch_size) > 0);
+  const pdfButton = document.querySelector("#formula-export-pdf");
+  pdfButton.dataset.productId = selectedProduct?.id || "";
+  pdfButton.disabled = !selectedProduct || !selectedFormulas.length;
   updateFormulaCopyForm(batches, data.formulas, selectedFormulas);
   renderFormulaEditor(selectedFormulas);
 }
@@ -2838,6 +2841,12 @@ document.querySelector("#formula-export-bom").addEventListener("click", (event) 
   const productId = event.currentTarget.dataset.productId;
   if (!productId) return;
   window.location.href = `/api/formulas/export/${productId}`;
+});
+
+document.querySelector("#formula-export-pdf").addEventListener("click", (event) => {
+  const productId = event.currentTarget.dataset.productId;
+  if (!productId) return;
+  window.location.href = `/api/formulas/export/${productId}/pdf`;
 });
 
 document.querySelector("#formula-import-bom").addEventListener("change", async (event) => {
