@@ -2216,7 +2216,6 @@ app.get(["/api/formulas/export/:productId", "/api/formulas/export/:productId/pdf
     if (isPdf) {
       const filename = product.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "formula";
       const doc = new PDFDocument({ size: "LETTER", margin: 44 });
-      const hasBatchSize = Number(product.batch_size) > 0;
       const amount = (value) => Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}-formula.pdf"`);
@@ -2227,18 +2226,16 @@ app.get(["/api/formulas/export/:productId", "/api/formulas/export/:productId/pdf
       doc.fontSize(14).text(product.name);
       doc.font("Helvetica").fontSize(10)
         .text(`Category: ${product.category}`)
-        .text(`Batch QTY: ${hasBatchSize ? amount(product.batch_size) : "Not set"}`)
-        .text("Amounts per unit are from the saved formula.");
+        .text("Ingredient amounts for one unit. Weights are shown in grams (g).");
       doc.moveDown(0.8);
-      const columns = [{ width: 264 }, { width: 95, align: "right" }, { width: 95, align: "right" }, { width: 70 }];
-      const header = () => writePdfTableRow(doc, columns, ["Ingredient", "Amount / Unit", "Batch Amount", "UOM"], {
+      const columns = [{ width: 354 }, { width: 170, align: "right" }];
+      const header = () => writePdfTableRow(doc, columns, ["Ingredient", "Amount per unit"], {
         bold: true, fill: "#eef3f2", fontSize: 10, minHeight: 26,
       });
       header();
       for (const ingredient of ingredients) {
-        const values = [ingredient.name, amount(ingredient.quantity_per_unit),
-          hasBatchSize ? amount(Number(ingredient.quantity_per_unit) * Number(product.batch_size)) : "Not set",
-          ingredient.quantity_uom];
+        const unit = normalizeIngredientUom(ingredient.quantity_uom, ingredient.name) === "each" ? "each" : "g";
+        const values = [ingredient.name, `${amount(ingredient.quantity_per_unit)} ${unit}`];
         doc.font("Helvetica").fontSize(10);
         const height = Math.max(26, ...columns.map((column, index) => doc.heightOfString(String(values[index] ?? ""), { width: column.width - 8 }) + 8));
         if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
