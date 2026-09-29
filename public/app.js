@@ -1361,6 +1361,12 @@ async function renderForecast() {
     state.forecastFilter = filterInput.value.trim();
     renderForecastTable(state.forecastRows);
   };
+  document.querySelector("#forecast-clear-search").onclick = () => {
+    filterInput.value = "";
+    state.forecastFilter = "";
+    renderForecastTable(state.forecastRows);
+    filterInput.focus();
+  };
   typeSelect.value = state.forecastIngredientType;
   typeSelect.onchange = () => {
     state.forecastIngredientType = typeSelect.value;
@@ -1463,6 +1469,8 @@ function forecastFilteredRows(rows) {
 
 function renderForecastTable(rows) {
   const filtered = forecastFilteredRows(rows);
+  document.querySelector("#forecast-search-results").textContent = `Showing ${filtered.length} of ${rows.length} inventory items`;
+  document.querySelector("#forecast-clear-search").disabled = !state.forecastFilter;
   renderForecastSummary(filtered);
   document.querySelector("#forecast-table").innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
@@ -2788,6 +2796,10 @@ document.querySelector("#refresh").addEventListener("click", async () => {
 document.querySelector("#global-filter").addEventListener("input", (event) => {
   state.filter = event.target.value;
   clearTimeout(filterRenderTimer);
+  if (document.querySelector("#tabs button.active").dataset.tab === "forecast") {
+    renderForecastTable(state.forecastRows);
+    return;
+  }
   filterRenderTimer = setTimeout(() => {
     activate(document.querySelector("#tabs button.active").dataset.tab);
   }, 250);

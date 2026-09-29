@@ -265,11 +265,6 @@
           </label>
           <button id="forecast-apply-range" type="button">Apply Date Range</button>
           <label class="form-field">
-            <span>Ingredient Search</span>
-            <input id="forecast-filter" type="search" placeholder="Ingredient name" list="forecast-ingredient-options">
-            <datalist id="forecast-ingredient-options"></datalist>
-          </label>
-          <label class="form-field">
             <span>Item Type</span>
             <select id="forecast-ingredient-type">
               <option value="">All types</option>
@@ -322,6 +317,16 @@
         </div>
         <div id="forecast-unmatched-inventory"></div>
         <div id="forecast-summary" class="forecast-summary"></div>
+        <div class="forecast-table-search">
+          <label class="form-field">
+            <span>Search inventory items</span>
+            <input id="forecast-filter" type="search" placeholder="Search by ingredient name, unit, or product" list="forecast-ingredient-options" aria-controls="forecast-table" aria-describedby="forecast-search-help">
+            <datalist id="forecast-ingredient-options"></datalist>
+          </label>
+          <button id="forecast-clear-search" class="secondary" type="button">Clear Search</button>
+          <span id="forecast-search-results" class="source-note" role="status"></span>
+          <div id="forecast-search-help" class="source-note">Search filters this table while keeping your selected date range and other settings.</div>
+        </div>
         <div id="forecast-table"></div>
       </section>
 

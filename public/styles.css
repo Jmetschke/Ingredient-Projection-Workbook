@@ -2005,3 +2005,20 @@ pre {
 .mapping-fields label { display: flex; flex-direction: column; gap: 6px; }
 .mapping-fields label[hidden], .mapping-editor[hidden] { display: none; }
 #inventory-mapping-preview { font-weight: 600; }
+
+.forecast-table-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.forecast-table-search .form-field {
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
+#forecast-search-help {
+  flex-basis: 100%;
+}
