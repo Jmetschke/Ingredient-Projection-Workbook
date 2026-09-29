@@ -1381,7 +1381,25 @@ app.get("/api/ingredients", async (req, res) => {
     FROM ingredients
     ORDER BY is_master DESC, name
   `);
-  ok(res, rows.map(withBomUom));
+  const inventoryByIngredient = new Map();
+  for (const inventory of await latestInventoryRows()) {
+    const key = String(inventory.ingredient_id);
+    const existing = inventoryByIngredient.get(key);
+    const grams = inventory.current_qty_grams == null ? null : Number(inventory.current_qty_grams);
+    inventoryByIngredient.set(key, {
+      each: (existing?.each || 0) + Number(inventory.current_qty || 0),
+      grams: existing
+        ? existing.grams == null || grams == null ? null : existing.grams + grams
+        : grams,
+    });
+  }
+  ok(res, rows.map((row) => {
+    const inventory = inventoryByIngredient.get(String(row.id));
+    return {
+      ...withBomUom(row),
+      current_inventory_count: inventory?.[row.purchase_uom === "each" ? "each" : "grams"] ?? null,
+    };
+  }));
 });
 
 app.post("/api/ingredients", async (req, res) => {

@@ -2349,7 +2349,7 @@ async function renderInventory() {
   document.querySelector("#inventory-table").innerHTML = rows.length ? `
     <div class="table-wrap editor-table-wrap">
       <table class="editor-table inventory-table">
-        <thead><tr><th>Name</th><th>UOM</th><th>Ingredient Type</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>UOM</th><th>Ingredient Type</th><th class="numeric">Current Inventory</th><th>Actions</th></tr></thead>
         <tbody>${rows.map((ingredient) => `
           <tr data-ingredient-id="${ingredient.id}">
             <td><input class="inventory-edit-name" aria-label="Ingredient name" value="${escapeHtml(ingredient.name)}"></td>
@@ -2364,6 +2364,7 @@ async function renderInventory() {
                 ${optionList(["SB/Hijnx", "SB", "Hijnx"].map((type) => ({ id: type, name: type })), ingredient.ingredient_type || "SB/Hijnx")}
               </select>
             </td>
+            <td class="numeric">${ingredient.current_inventory_count == null ? "—" : qty(ingredient.current_inventory_count)}</td>
             <td class="row-actions">
               <button class="small secondary save-inventory" type="button">Save</button>
               <button class="small danger delete-inventory" type="button">Delete</button>
@@ -2412,10 +2413,18 @@ async function renderInventory() {
   });
 }
 
-function printInventoryCountSheet(rows) {
+async function printInventoryCountSheet(rows) {
   const printWindow = window.open("", "_blank", "width=900,height=850");
   if (!printWindow) {
     setMessage("#inventory-message", "Allow pop-ups to print the inventory count sheet.", "error");
+    return;
+  }
+  try {
+    const latest = new Map((await api("/api/ingredients")).map((item) => [String(item.id), item]));
+    rows = rows.map((item) => latest.get(String(item.id))).filter(Boolean);
+  } catch (error) {
+    printWindow.close();
+    setMessage("#inventory-message", `Unable to load current inventory: ${error.message}`, "error");
     return;
   }
   const printedAt = new Intl.DateTimeFormat(undefined, {
@@ -2428,6 +2437,7 @@ function printInventoryCountSheet(rows) {
       <td>${escapeHtml(ingredient.name)}</td>
       <td>${escapeHtml(ingredient.ingredient_type || "")}</td>
       <td>${escapeHtml(ingredient.purchase_uom || "")}</td>
+      <td class="numeric">${ingredient.current_inventory_count == null ? "—" : qty(ingredient.current_inventory_count)}</td>
       <td class="count-space"></td>
     </tr>
   `).join("");
@@ -2446,10 +2456,12 @@ function printInventoryCountSheet(rows) {
           table { border-collapse: collapse; table-layout: fixed; width: 100%; }
           th, td { border: 1px solid #66737a; font-size: 12px; padding: 8px; text-align: left; }
           th { background: #edf2f3; }
-          th:nth-child(1) { width: 38%; }
-          th:nth-child(2) { width: 18%; }
-          th:nth-child(3) { width: 14%; }
-          th:nth-child(4) { width: 30%; }
+          th:nth-child(1) { width: 30%; }
+          th:nth-child(2) { width: 16%; }
+          th:nth-child(3) { width: 10%; }
+          th:nth-child(4) { width: 24%; }
+          th:nth-child(5) { width: 20%; }
+          td.numeric { text-align: right; }
           tbody tr { break-inside: avoid; page-break-inside: avoid; }
           td.count-space { height: 38px; }
           @media print { body { padding: 0; } }
@@ -2461,8 +2473,8 @@ function printInventoryCountSheet(rows) {
           <p>${escapeHtml(printedAt)} · ${rows.length} inventory item${rows.length === 1 ? "" : "s"}</p>
         </header>
         <table>
-          <thead><tr><th>Inventory Item</th><th>Ingredient Type</th><th>UOM</th><th>Current Inventory Count</th></tr></thead>
-          <tbody>${tableRows || `<tr><td colspan="4">No inventory items in the current list.</td></tr>`}</tbody>
+          <thead><tr><th>Inventory Item</th><th>Ingredient Type</th><th>UOM</th><th>Inventory as of ${escapeHtml(printedAt)}</th><th>Physical Count</th></tr></thead>
+          <tbody>${tableRows || `<tr><td colspan="5">No inventory items in the current list.</td></tr>`}</tbody>
         </table>
         <script>window.addEventListener("load", () => window.print());<\/script>
       </body>
