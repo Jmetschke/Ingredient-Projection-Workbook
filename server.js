@@ -1382,22 +1382,31 @@ app.get("/api/ingredients", async (req, res) => {
     ORDER BY is_master DESC, name
   `);
   const inventoryByIngredient = new Map();
-  for (const inventory of await latestInventoryRows()) {
-    const key = String(inventory.ingredient_id);
-    const existing = inventoryByIngredient.get(key);
+  const inventoryByName = new Map();
+  function aggregateInventory(map, key, inventory) {
+    if (!key) return;
+    const existing = map.get(key);
     const grams = inventory.current_qty_grams == null ? null : Number(inventory.current_qty_grams);
-    inventoryByIngredient.set(key, {
+    map.set(key, {
       each: (existing?.each || 0) + Number(inventory.current_qty || 0),
       grams: existing
         ? existing.grams == null || grams == null ? null : existing.grams + grams
         : grams,
     });
   }
+  for (const inventory of await latestInventoryRows()) {
+    aggregateInventory(inventoryByIngredient, inventory.ingredient_id ? String(inventory.ingredient_id) : "", inventory);
+    aggregateInventory(inventoryByName, normalizeMatchText(inventory.ingredient_name || inventory.uploaded_name), inventory);
+  }
   ok(res, rows.map((row) => {
-    const inventory = inventoryByIngredient.get(String(row.id));
+    const ingredient = withBomUom(row);
+    const inventory = inventoryByIngredient.get(String(ingredient.id))
+      || inventoryByName.get(normalizeMatchText(ingredient.name));
     return {
-      ...withBomUom(row),
-      current_inventory_count: inventory?.[row.purchase_uom === "each" ? "each" : "grams"] ?? null,
+      ...ingredient,
+      current_inventory_count: ingredient.purchase_uom === "each"
+        ? inventory?.each ?? null
+        : inventory?.grams ?? inventory?.each ?? null,
     };
   }));
 });
