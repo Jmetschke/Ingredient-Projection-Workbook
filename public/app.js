@@ -2519,8 +2519,11 @@ async function printInventoryCountSheet(rows) {
     setMessage("#inventory-message", "Allow pop-ups to print the inventory count sheet.", "error");
     return;
   }
+  let packageSizes;
   try {
-    const latest = new Map((await api("/api/ingredients")).map((item) => [String(item.id), item]));
+    const [ingredients, sizes] = await Promise.all([api("/api/ingredients"), api("/api/inventory-package-sizes")]);
+    const latest = new Map(ingredients.map((item) => [String(item.id), item]));
+    packageSizes = new Map(sizes.map((item) => [String(item.id), item]));
     rows = rows.map((item) => latest.get(String(item.id))).filter(Boolean);
   } catch (error) {
     printWindow.close();
@@ -2532,15 +2535,25 @@ async function printInventoryCountSheet(rows) {
     month: "long",
     day: "numeric",
   }).format(new Date());
-  const tableRows = rows.map((ingredient) => `
-    <tr>
+  const tableRows = rows.map((ingredient) => {
+    const packageInfo = inventoryPackageInfo({
+      quantity_uom: ingredient.purchase_uom,
+      current_inventory: ingredient.current_inventory_count,
+      current_inventory_grams: ingredient.current_inventory_count,
+    }, packageSizes.get(String(ingredient.id)));
+    const packageCount = packageInfo.count == null ? "—"
+      : `${Number(packageInfo.count).toLocaleString(undefined, { maximumFractionDigits: 6 })} (${escapeHtml(packageInfo.label)})`;
+    return `<tr>
       <td>${escapeHtml(ingredient.name)}</td>
       <td>${escapeHtml(ingredient.ingredient_type || "")}</td>
       <td>${escapeHtml(ingredient.purchase_uom || "")}</td>
       <td class="numeric">${ingredient.current_inventory_count == null ? "—" : qty(ingredient.current_inventory_count)}</td>
+      <td>${escapeHtml(packageInfo.description)}</td>
+      <td class="numeric">${packageCount}</td>
       <td class="count-space"></td>
     </tr>
-  `).join("");
+    `;
+  }).join("");
   printWindow.document.write(`
     <!doctype html>
     <html>
@@ -2556,11 +2569,14 @@ async function printInventoryCountSheet(rows) {
           table { border-collapse: collapse; table-layout: fixed; width: 100%; }
           th, td { border: 1px solid #66737a; font-size: 12px; padding: 8px; text-align: left; }
           th { background: #edf2f3; }
-          th:nth-child(1) { width: 30%; }
-          th:nth-child(2) { width: 16%; }
-          th:nth-child(3) { width: 10%; }
-          th:nth-child(4) { width: 24%; }
-          th:nth-child(5) { width: 20%; }
+          th:nth-child(1) { width: 24%; }
+          th:nth-child(2) { width: 10%; }
+          th:nth-child(3) { width: 7%; }
+          th:nth-child(4) { width: 17%; }
+          th:nth-child(5) { width: 18%; }
+          th:nth-child(6), th:nth-child(7) { width: 12%; }
+          th, td { overflow-wrap: anywhere; }
+          @page { size: landscape; }
           td.numeric { text-align: right; }
           tbody tr { break-inside: avoid; page-break-inside: avoid; }
           td.count-space { height: 38px; }
@@ -2573,8 +2589,8 @@ async function printInventoryCountSheet(rows) {
           <p>${escapeHtml(printedAt)} · ${rows.length} inventory item${rows.length === 1 ? "" : "s"}</p>
         </header>
         <table>
-          <thead><tr><th>Inventory Item</th><th>Ingredient Type</th><th>UOM</th><th>Inventory as of ${escapeHtml(printedAt)}</th><th>Physical Count</th></tr></thead>
-          <tbody>${tableRows || `<tr><td colspan="5">No inventory items in the current list.</td></tr>`}</tbody>
+          <thead><tr><th>Inventory Item</th><th>Ingredient Type</th><th>UOM</th><th>Inventory as of ${escapeHtml(printedAt)}</th><th>Package Size</th><th>Units on Hand</th><th>Physical Count</th></tr></thead>
+          <tbody>${tableRows || `<tr><td colspan="7">No inventory items in the current list.</td></tr>`}</tbody>
         </table>
         <script>window.addEventListener("load", () => window.print());<\/script>
       </body>

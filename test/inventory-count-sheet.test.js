@@ -43,6 +43,7 @@ test('inventory count uses recorded quantities without a gram conversion and mat
     window: { open: () => ({ document: { write: value => { html = value; }, close() {} } }) },
     escapeHtml: String, qty: String, Intl, Date,
   });
+  vm.runInContext(client.slice(client.indexOf('function inventoryPackageInfo('), client.indexOf('async function editDashboardPackageSizes(')), context);
   vm.runInContext(client.slice(client.indexOf('async function printInventoryCountSheet('), client.indexOf('async function renderFormulas(')), context);
   await context.printInventoryCountSheet(rows.map(row => ({ id: row.id })));
   for (const quantity of ['125', '20', '0', '—']) {
@@ -60,4 +61,31 @@ test('converted quantities aggregate and ingredient ID takes precedence over nam
     { ingredient_id: 9, ingredient_name: 'Flour', current_qty: 100, current_qty_grams: 100000 },
   ]);
   assert.equal(rows[0].current_inventory_count, 5000);
+});
+
+
+test('count sheet includes grams, saved package size, fractional and zero units, and blank physical counts', async () => {
+  const rows = [
+    { id: 1, name: 'Product A', purchase_uom: 'grams', current_inventory_count: 7000 },
+    { id: 2, name: 'Partial box', purchase_uom: 'grams', current_inventory_count: 1750 },
+    { id: 3, name: 'Empty box', purchase_uom: 'grams', current_inventory_count: 0 },
+    { id: 4, name: 'Unknown size', purchase_uom: 'grams', current_inventory_count: 10 },
+    { id: 5, name: 'Missing inventory', purchase_uom: 'grams', current_inventory_count: null },
+  ];
+  const sizes = [1, 2, 3, 5].map(id => ({ id, inventory_uom: 'box', package_weight: 3.5, weight_unit: 'kg', grams_per_inventory_unit: 3500 }));
+  let html = '';
+  const context = vm.createContext({
+    api: async endpoint => endpoint === '/api/ingredients' ? rows : sizes,
+    window: { open: () => ({ document: { write: value => { html = value; }, close() {} } }) },
+    escapeHtml: String, qty: String, Intl, Date,
+  });
+  vm.runInContext(client.slice(client.indexOf('function inventoryPackageInfo('), client.indexOf('async function editDashboardPackageSizes(')), context);
+  vm.runInContext(client.slice(client.indexOf('async function printInventoryCountSheet('), client.indexOf('async function renderFormulas(')), context);
+  await context.printInventoryCountSheet(rows);
+  assert.match(html, /<td class="numeric">7000<\/td>/);
+  assert.match(html, /1 box = 3.5 kg/);
+  for (const count of ['2', '0.5', '0']) assert.ok(html.includes(`<td class="numeric">${count} (box)</td>`));
+  assert.match(html, /Package size not set/);
+  assert.equal((html.match(/class="count-space"/g) || []).length, 5);
+  assert.ok(html.includes('<th>Units on Hand</th>'));
 });
