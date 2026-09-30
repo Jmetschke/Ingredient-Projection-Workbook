@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { createClient } from '@libsql/client';
-import { inventoryWeightConversion } from '../src/inventory-mapping.js';
+import { inventoryWeightConversion, resolveInventoryPackageSize } from '../src/inventory-mapping.js';
 import { bomUomForIngredient } from '../src/master-ingredients.js';
 import { INGREDIENT_UNIT_CONVERSION_BY_NAME } from '../src/ingredient-unit-conversions.js';
 
@@ -48,7 +48,7 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
   try {
     await db.executeMultiple(fs.readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8'));
     await db.execute('ALTER TABLE ingredients ADD COLUMN is_master INTEGER NOT NULL DEFAULT 1');
-    await db.execute("INSERT INTO ingredients (id, name, purchase_uom) VALUES (1, 'Test ingredient', 'grams'), (2, 'Boxes', 'each')");
+    await db.execute("INSERT INTO ingredients (id, name, purchase_uom) VALUES (1, 'Test ingredient', 'grams'), (2, 'Boxes', 'each'), (3, 'Chocolate Chips', 'grams')");
     const all = async (sql, args = []) => (await db.execute({ sql, args })).rows.map(row => ({ ...row }));
     const one = async (sql, args = []) => (await all(sql, args))[0];
     const run = (sql, args = []) => db.execute({ sql, args });
@@ -56,7 +56,7 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     const register = method => (url, ...handlers) => routes.set(`${method} ${url}`, handlers.at(-1));
     let response;
     const ctx = vm.createContext({
-      all, one, run, Buffer, inventoryWeightConversion, bomUomForIngredient, INGREDIENT_UNIT_CONVERSION_BY_NAME,
+      all, one, run, Buffer, inventoryWeightConversion, resolveInventoryPackageSize, bomUomForIngredient, INGREDIENT_UNIT_CONVERSION_BY_NAME,
       INGREDIENT_TYPES: new Set(['SB', 'Hijnx', 'SB/Hijnx']),
       app: { get: register('GET'), put: register('PUT'), post: register('POST') },
       express: { raw: () => null },
@@ -94,8 +94,46 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     assert.equal(saved.grams_per_inventory_unit, 3500);
     assert.equal(saved.package_weight, 3.5);
     assert.equal(saved.weight_unit, 'kg');
+    const chocolate = response.data.find(row => row.id === 3);
+    assert.equal(chocolate.inventory_uom, '10kg Box');
+    assert.equal(chocolate.grams_per_inventory_unit, 10000);
+    assert.equal(chocolate.package_size_source, 'default');
+    let printed = '';
+    const printContext = vm.createContext({
+      api: async endpoint => endpoint === '/api/inventory-package-sizes' ? response.data : [{ id: 3, name: 'Chocolate Chips', purchase_uom: 'grams', current_inventory_count: 7580 }],
+      window: { open: () => ({ document: { write: html => { printed = html; }, close() {} } }) },
+      escapeHtml: String, qty: String, Intl, Date,
+    });
+    vm.runInContext(helper, printContext);
+    vm.runInContext(clientSource.slice(clientSource.indexOf('async function printInventoryCountSheet('), clientSource.indexOf('async function renderFormulas(')), printContext);
+    await printContext.printInventoryCountSheet([{ id: 3 }]);
+    assert.ok(printed.includes('0.758 (10kg Box)'));
+    assert.ok(!printed.includes('Package size not set'));
+
   } finally {
     db.close();
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('report sizes reuse existing conversions and preserve manual override priority', () => {
+  const chocolate = { id: 3, name: 'Chocolate Chips' };
+  const defaults = INGREDIENT_UNIT_CONVERSION_BY_NAME.get('chocolate chips');
+  const fallback = resolveInventoryPackageSize(chocolate, [], [], defaults);
+  assert.equal(fallback.grams_per_inventory_unit, 10000);
+  assert.equal(fallback.inventory_uom, '10kg Box');
+  assert.equal(fallback.package_size_source, 'default');
+  assert.equal(context.inventoryPackageInfo({ ...inventory, current_inventory_grams: 7580 }, fallback).count, 0.758);
+
+  const imported = { ingredient_id: 3, inventory_uom: 'bag', grams_per_inventory_unit: 2000 };
+  const corrected = { ingredient_id: 3, inventory_uom: 'box', grams_per_inventory_unit: 3500, package_weight: 3.5, weight_unit: 'kg' };
+  assert.equal(resolveInventoryPackageSize(chocolate, [], [imported], defaults).grams_per_inventory_unit, 2000);
+  assert.equal(resolveInventoryPackageSize(chocolate, [corrected], [imported], defaults).grams_per_inventory_unit, 3500);
+  assert.equal(resolveInventoryPackageSize({ ...chocolate, ...size }, [corrected], [imported], defaults).package_size_source, 'manual');
+  // Manual inventory entries store grams, not a new package size.
+  const manualGrams = { ingredient_id: 3, match_method: 'manual_update', inventory_uom: 'grams', grams_per_inventory_unit: 1 };
+  assert.equal(resolveInventoryPackageSize(chocolate, [], [manualGrams], defaults).grams_per_inventory_unit, 10000);
+  const conflict = resolveInventoryPackageSize(chocolate, [corrected, { ...corrected, grams_per_inventory_unit: 5000 }], [], defaults);
+  assert.equal(conflict.package_size_source, 'conflict');
+  assert.equal(context.inventoryPackageInfo(inventory, conflict).count, null);
 });

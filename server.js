@@ -10,7 +10,7 @@ import { calendarAll, calendarDbConfigured, calendarSchema } from "./src/rl-cale
 import { BATCH_TYPES, PRODUCT_ALIASES, VELOCITY_BATCH_UNIT_MULTIPLIERS } from "./src/master-products.js";
 import { bomUomForIngredient } from "./src/master-ingredients.js";
 import { INGREDIENT_UNIT_CONVERSION_BY_NAME } from "./src/ingredient-unit-conversions.js";
-import { inventoryWeightConversion } from "./src/inventory-mapping.js";
+import { inventoryWeightConversion, resolveInventoryPackageSize } from "./src/inventory-mapping.js";
 
 dotenv.config();
 
@@ -1423,7 +1423,14 @@ app.get("/api/inventory-package-sizes", async (req, res) => {
       WHERE i.is_master = 1
       ORDER BY i.name
     `);
-    ok(res, rows.map(withBomUom));
+    const [overrides, inventoryRows] = await Promise.all([
+      all("SELECT * FROM inventory_unit_overrides"),
+      latestInventoryRows(),
+    ]);
+    ok(res, rows.map((row) => ({
+      ...withBomUom(row),
+      ...resolveInventoryPackageSize(row, overrides, inventoryRows, inventoryConversionForName(row.name)),
+    })));
   } catch (error) { fail(res, error); }
 });
 

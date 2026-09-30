@@ -334,6 +334,9 @@ function inventoryPackageInfo(row, savedSize) {
   if (String(row.quantity_uom || '').toLowerCase() === 'each') {
     return { count: row.current_inventory, label: 'each', description: 'Counted individually' };
   }
+  if (savedSize?.package_size_source === 'conflict') {
+    return { count: null, label: '', description: 'Multiple package sizes — select one in Edit Package Sizes' };
+  }
   const gramsPerPackage = Number(savedSize?.grams_per_inventory_unit ?? row.grams_per_inventory_unit);
   const label = savedSize?.inventory_uom || row.inventory_source_uom || '';
   // A one-gram source unit is a measurement, not a known package size.
@@ -378,9 +381,13 @@ async function editDashboardPackageSizes(inventoryRows) {
       fields.inventory_uom.value = item?.inventory_uom || existing?.label || 'unit';
       fields.package_weight.value = item?.package_weight || (existing?.label ? inventory.grams_per_inventory_unit : '') || '';
       fields.weight_unit.value = item?.weight_unit || 'g';
-      document.querySelector('#dashboard-package-source').textContent = item?.package_weight
-        ? 'Manual override saved — future uploads will keep this package size.'
-        : 'No manual size saved. Review any prefilled import conversion before saving.';
+      document.querySelector('#dashboard-package-source').textContent = {
+        manual: 'Manual override saved — future uploads will keep this package size.',
+        saved_import: 'Using your saved Inventory Mapping correction. Uploads preserve this conversion.',
+        import: 'Using the current imported package size. Save to keep it as a manual override.',
+        default: 'Using the existing app conversion. Review it and save if you want a manual override.',
+        conflict: 'More than one package size is recorded. Choose the size to use for this report.',
+      }[item?.package_size_source] || 'No package size is known. Enter a weight to save a manual override.';
       form.querySelector('[type="submit"]').disabled = !item;
       preview();
     };
@@ -398,7 +405,7 @@ async function editDashboardPackageSizes(inventoryRows) {
           method: 'PUT',
           body: JSON.stringify({ inventory_uom: fields.inventory_uom.value, package_weight: fields.package_weight.value, weight_unit: fields.weight_unit.value }),
         });
-        Object.assign(item, saved);
+        Object.assign(item, saved, { package_size_source: "manual" });
         populate();
         setMessage('#dashboard-package-message', `Saved package size for ${item.name}. Future uploads will preserve this manual override.`, 'success');
       } catch (error) {
