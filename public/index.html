@@ -117,10 +117,26 @@
             <h2>Ingredient Usage - Next 6 Months</h2>
             <div class="dashboard-inventory-actions">
               <span id="dashboard-inventory-as-of">Scheduled Production Planner BOM totals</span>
+              <button id="dashboard-edit-packages" class="secondary" type="button">Edit Package Sizes</button>
               <button id="dashboard-print-inventory" type="button">Print Current Inventory</button>
               <button id="dashboard-print-shortages" class="secondary" type="button">Print Shortage Report</button>
             </div>
           </div>
+          <div id="dashboard-package-message" class="source-note" role="status"></div>
+          <section id="dashboard-package-editor" class="manual-inventory-panel" hidden>
+            <h3>Inventory Package Sizes</h3>
+            <p class="source-note">Define the weight of one bag, jar, box, or unit for the printed inventory report. Saved manual sizes stay in effect after uploads. Inventory grams remain unchanged.</p>
+            <form id="dashboard-package-form" class="inline-form">
+              <label class="form-field"><span>Inventory item</span><select name="package_ingredient_id" required></select></label>
+              <label class="form-field"><span>Package name (singular)</span><input name="inventory_uom" placeholder="unit, bag, jar, box" maxlength="100" required></label>
+              <label class="form-field"><span>Weight of 1 package</span><input name="package_weight" type="number" min="0.000000001" step="any" placeholder="3.5" required></label>
+              <label class="form-field"><span>Weight unit</span><select name="weight_unit"><option value="g">Grams (g)</option><option value="kg">Kilograms (kg)</option><option value="lb">Pounds (lb)</option><option value="oz">Ounces (oz)</option></select></label>
+              <button type="submit">Save Package Size</button>
+              <button id="dashboard-package-close" class="secondary" type="button">Close</button>
+            </form>
+            <p id="dashboard-package-source" class="source-note"></p>
+            <p id="dashboard-package-preview" role="status"></p>
+          </section>
           <div id="dashboard-ingredient-usage"></div>
         </section>
         <section>

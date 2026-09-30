@@ -283,6 +283,7 @@ async function renderDashboard() {
   document.querySelector("#dashboard-inventory-as-of").textContent = inventoryAsOf
     ? `Current inventory as of ${formatInventoryAsOf(inventoryAsOf)}`
     : "No current inventory snapshot loaded";
+  document.querySelector("#dashboard-edit-packages").onclick = () => editDashboardPackageSizes(inventoryRows);
   document.querySelector("#dashboard-print-inventory").onclick = () => printDashboardInventory(inventoryRows, inventoryAsOf);
   document.querySelector("#dashboard-print-shortages").onclick = () => printIngredientShortageReport(inventoryRows, {
     source: "Dashboard",
@@ -329,10 +330,101 @@ function formatInventoryAsOf(value) {
   }).format(date);
 }
 
-function printDashboardInventory(rows, inventoryAsOf) {
+function inventoryPackageInfo(row, savedSize) {
+  if (String(row.quantity_uom || '').toLowerCase() === 'each') {
+    return { count: row.current_inventory, label: 'each', description: 'Counted individually' };
+  }
+  const gramsPerPackage = Number(savedSize?.grams_per_inventory_unit ?? row.grams_per_inventory_unit);
+  const label = savedSize?.inventory_uom || row.inventory_source_uom || '';
+  // A one-gram source unit is a measurement, not a known package size.
+  const isWeightUnit = /^(g|grams?|kg|kilograms?|lb|lbs|pounds?|oz|ounces?)$/i.test(label.trim());
+  if (!(gramsPerPackage > 0) || !Number.isFinite(gramsPerPackage) || !label || (!savedSize?.package_weight && isWeightUnit)) {
+    return { count: null, label: '', description: 'Package size not set' };
+  }
+  const format = value => Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
+  const sizeText = savedSize?.package_weight
+    ? `${format(savedSize.package_weight)} ${savedSize.weight_unit}`
+    : `${format(gramsPerPackage)} g`;
+  return {
+    count: row.current_inventory_grams == null ? null : Number(row.current_inventory_grams) / gramsPerPackage,
+    label,
+    description: `1 ${label} = ${sizeText}`,
+  };
+}
+
+async function editDashboardPackageSizes(inventoryRows) {
+  const panel = document.querySelector('#dashboard-package-editor');
+  const form = document.querySelector('#dashboard-package-form');
+  const fields = form.elements;
+  try {
+    const items = (await api('/api/inventory-package-sizes')).filter(item => item.purchase_uom !== 'each');
+    fields.package_ingredient_id.innerHTML = items.map(item => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('');
+    panel.hidden = false;
+    const selectedItem = () => items.find(item => String(item.id) === fields.package_ingredient_id.value);
+    const selectedInventory = () => inventoryRows.find(row => String(row.ingredient_id) === fields.package_ingredient_id.value && row.quantity_uom !== 'each');
+    const preview = () => {
+      const gramsPerPackage = Number(fields.package_weight.value) * { g: 1, kg: 1000, lb: 453.59237, oz: 28.349523125 }[fields.weight_unit.value];
+      const grams = selectedInventory()?.current_inventory_grams;
+      const format = value => Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
+      const valid = gramsPerPackage > 0 && Number.isFinite(gramsPerPackage) && fields.inventory_uom.value.trim();
+      document.querySelector('#dashboard-package-preview').textContent = valid
+        ? `1 ${fields.inventory_uom.value.trim()} = ${format(fields.package_weight.value)} ${fields.weight_unit.value} (${format(gramsPerPackage)} g). ${grams == null ? 'No current inventory recorded.' : `${format(grams)} g ÷ ${format(gramsPerPackage)} g = ${format(Number(grams) / gramsPerPackage)} package units on hand.`}`
+        : 'Enter a package name and weight to preview the conversion.';
+    };
+    const populate = () => {
+      const item = selectedItem();
+      const inventory = selectedInventory();
+      const existing = inventory ? inventoryPackageInfo(inventory, item) : null;
+      fields.inventory_uom.value = item?.inventory_uom || existing?.label || 'unit';
+      fields.package_weight.value = item?.package_weight || (existing?.label ? inventory.grams_per_inventory_unit : '') || '';
+      fields.weight_unit.value = item?.weight_unit || 'g';
+      document.querySelector('#dashboard-package-source').textContent = item?.package_weight
+        ? 'Manual override saved — future uploads will keep this package size.'
+        : 'No manual size saved. Review any prefilled import conversion before saving.';
+      form.querySelector('[type="submit"]').disabled = !item;
+      preview();
+    };
+    fields.package_ingredient_id.onchange = populate;
+    form.oninput = preview;
+    document.querySelector('#dashboard-package-close').onclick = () => { panel.hidden = true; };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const item = selectedItem();
+      if (!item) return;
+      const button = form.querySelector('[type="submit"]');
+      button.disabled = true;
+      try {
+        const saved = await api(`/api/inventory-package-sizes/${item.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ inventory_uom: fields.inventory_uom.value, package_weight: fields.package_weight.value, weight_unit: fields.weight_unit.value }),
+        });
+        Object.assign(item, saved);
+        populate();
+        setMessage('#dashboard-package-message', `Saved package size for ${item.name}. Future uploads will preserve this manual override.`, 'success');
+      } catch (error) {
+        setMessage('#dashboard-package-message', error.message, 'error');
+      } finally { button.disabled = false; }
+    };
+    populate();
+    panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  } catch (error) { setMessage('#dashboard-package-message', error.message, 'error'); }
+}
+
+async function printDashboardInventory(rows, inventoryAsOf) {
   const printWindow = window.open("", "_blank", "width=900,height=850");
   if (!printWindow) {
     alert("Allow pop-ups to print the current inventory report.");
+    return;
+  }
+  let packageSizes;
+  try {
+    const [sizes, data] = await Promise.all([api("/api/inventory-package-sizes"), api("/api/summary")]);
+    packageSizes = new Map(sizes.map(item => [String(item.id), item]));
+    rows = data.ingredientUsage?.rows || [];
+    inventoryAsOf = data.ingredientUsage?.inventory_as_of || "";
+  } catch (error) {
+    printWindow.close();
+    setMessage("#dashboard-package-message", `Unable to load inventory report: ${error.message}`, "error");
     return;
   }
   const inventoryRows = rows
@@ -342,10 +434,9 @@ function printDashboardInventory(rows, inventoryAsOf) {
     const totalGrams = String(row.quantity_uom || "").toLowerCase() === "each"
       ? "—"
       : row.current_inventory_grams == null ? "—" : qty(row.current_inventory_grams);
-    const totalUnits = row.current_inventory == null
-      ? "—"
-      : `${qty(row.current_inventory)} ${escapeHtml(row.inventory_source_uom || row.inventory_uom || "units")}`;
-    return `<tr><td>${escapeHtml(row.ingredient_name)}</td><td class="numeric">${totalGrams}</td><td class="numeric">${totalUnits}</td></tr>`;
+    const info = inventoryPackageInfo(row, packageSizes.get(String(row.ingredient_id)));
+    const totalUnits = info.count == null ? "—" : Number(info.count).toLocaleString(undefined, { maximumFractionDigits: 6 });
+    return `<tr><td>${escapeHtml(row.ingredient_name)}</td><td class="numeric">${totalGrams}</td><td>${escapeHtml(info.description)}</td><td class="numeric">${totalUnits}${info.count == null ? "" : ` (${escapeHtml(info.label)})`}</td></tr>`;
   }).join("");
   printWindow.document.write(`
     <!doctype html>
@@ -362,8 +453,9 @@ function printDashboardInventory(rows, inventoryAsOf) {
           table { border-collapse: collapse; width: 100%; }
           th, td { border: 1px solid #66737a; font-size: 12px; padding: 8px; text-align: left; }
           th { background: #edf2f3; }
-          th:first-child { width: 50%; }
-          th:nth-child(2), th:nth-child(3) { width: 25%; }
+          th:first-child { width: 34%; }
+          th:nth-child(2), th:nth-child(4) { width: 18%; }
+          th:nth-child(3) { width: 30%; }
           .numeric { text-align: right; }
           tbody tr { break-inside: avoid; page-break-inside: avoid; }
           @media print { body { padding: 0; } }
@@ -375,8 +467,8 @@ function printDashboardInventory(rows, inventoryAsOf) {
           <p>As of ${escapeHtml(formatInventoryAsOf(inventoryAsOf))} · ${inventoryRows.length} item${inventoryRows.length === 1 ? "" : "s"}</p>
         </header>
         <table>
-          <thead><tr><th>Name</th><th class="numeric">Total Grams on Hand</th><th class="numeric">Total Units on Hand</th></tr></thead>
-          <tbody>${tableRows || `<tr><td colspan="3">No current inventory snapshot is loaded.</td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th class="numeric">Total Grams on Hand</th><th>Package Size</th><th class="numeric">Total Units on Hand</th></tr></thead>
+          <tbody>${tableRows || `<tr><td colspan="4">No current inventory snapshot is loaded.</td></tr>`}</tbody>
         </table>
         <script>window.addEventListener("load", () => window.print());<\/script>
       </body>
@@ -1682,7 +1774,7 @@ async function uploadForecastInventoryPdf(input) {
     await renderForecast();
     setMessage(
       "#forecast-inventory-message",
-      `Loaded ${payload.data.rows.length} inventory rows. ${payload.data.matched} matched, ${payload.data.unmatched} unmatched.`,
+      `Loaded ${payload.data.rows.length} inventory rows. ${payload.data.matched} matched, ${payload.data.unmatched} unmatched.${payload.data.preserved_package_sizes?.length ? ` Manual package sizes kept for: ${payload.data.preserved_package_sizes.join(", ")}. Upload values did not replace these overrides.` : ""}`,
       payload.data.unmatched ? "warning" : "success",
     );
   } catch (error) {

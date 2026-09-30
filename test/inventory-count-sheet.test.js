@@ -19,7 +19,7 @@ async function inventoryResponse(ingredients, inventory) {
     INGREDIENT_TYPES: new Set(['SB', 'Hijnx', 'SB/Hijnx']),
   });
   vm.runInContext(server.slice(server.indexOf('function withBomUom('), server.indexOf('function pdfText(')), context);
-  vm.runInContext(server.slice(server.indexOf('app.get("/api/ingredients"'), server.indexOf('app.post("/api/ingredients"')), context);
+  vm.runInContext(server.slice(server.indexOf('app.get("/api/ingredients"'), server.indexOf('app.get("/api/inventory-package-sizes"')), context);
   await handler({}, {});
   return result;
 }

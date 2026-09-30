@@ -1411,6 +1411,42 @@ app.get("/api/ingredients", async (req, res) => {
   }));
 });
 
+// Report package sizes are independent of upload quantity conversions: editing
+// a package size must never multiply or replace the grams already on hand.
+app.get("/api/inventory-package-sizes", async (req, res) => {
+  try {
+    const rows = await all(`
+      SELECT i.id, i.name, i.purchase_uom, i.ingredient_type,
+             p.inventory_uom, p.package_weight, p.weight_unit, p.grams_per_inventory_unit
+      FROM ingredients i
+      LEFT JOIN ingredient_package_sizes p ON p.ingredient_id = i.id
+      WHERE i.is_master = 1
+      ORDER BY i.name
+    `);
+    ok(res, rows.map(withBomUom));
+  } catch (error) { fail(res, error); }
+});
+
+app.put("/api/inventory-package-sizes/:id", async (req, res) => {
+  try {
+    const row = await one("SELECT * FROM ingredients WHERE id = ? AND is_master = 1", [req.params.id]);
+    if (!row) return fail(res, new Error("Inventory item not found"), 404);
+    if (withBomUom(row).purchase_uom === "each") {
+      return fail(res, new Error("Items counted as each do not use a package weight."), 400);
+    }
+    const size = inventoryWeightConversion(req.body);
+    await run(`
+      INSERT INTO ingredient_package_sizes
+        (ingredient_id, inventory_uom, package_weight, weight_unit, grams_per_inventory_unit)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(ingredient_id) DO UPDATE SET
+        inventory_uom = excluded.inventory_uom, package_weight = excluded.package_weight,
+        weight_unit = excluded.weight_unit, grams_per_inventory_unit = excluded.grams_per_inventory_unit
+    `, [row.id, size.inventory_uom, size.package_weight, size.weight_unit, size.grams_per_inventory_unit]);
+    ok(res, { ingredient_id: row.id, ...size });
+  } catch (error) { fail(res, error, 400); }
+});
+
 app.post("/api/ingredients", async (req, res) => {
   try {
     const name = String(req.body.name || "").trim();
@@ -1868,11 +1904,18 @@ app.post("/api/inventory-upload", express.raw({ type: ["application/pdf", "appli
     if (!buffer.length) return fail(res, new Error("Upload a PDF inventory valuation report."), 400);
     const parsedRows = rowsFromDistruInventoryPdf(buffer);
     if (!parsedRows.length) return fail(res, new Error("No inventory rows were found in that PDF."), 400);
-    const matchedRows = matchInventoryRows(parsedRows, await activeMasterIngredients(), await inventoryAliasIngredients(), await inventoryUnitOverrides());
+    const unitOverrides = await inventoryUnitOverrides();
+    const matchedRows = matchInventoryRows(parsedRows, await activeMasterIngredients(), await inventoryAliasIngredients(), unitOverrides);
+    const packageSizes = new Set((await all("SELECT ingredient_id FROM ingredient_package_sizes")).map((row) => String(row.ingredient_id)));
+    const protectedItems = new Set(matchedRows.filter((row) => {
+      const override = unitOverrides.get(normalizeMatchText(row.uploaded_name));
+      return packageSizes.has(String(row.ingredient_id)) || (override && override.ingredient_id === row.ingredient_id);
+    }).map((row) => row.ingredient_name || row.uploaded_name));
     await replaceLatestInventoryRows(matchedRows);
     const savedRows = await latestInventoryRows();
     ok(res, {
       rows: savedRows,
+      preserved_package_sizes: [...protectedItems],
       matched: savedRows.filter((row) => row.ingredient_id).length,
       unmatched: savedRows.filter((row) => !row.ingredient_id).length,
     });

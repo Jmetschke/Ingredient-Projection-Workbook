@@ -173,3 +173,11 @@ CREATE TABLE IF NOT EXISTS inventory_unit_overrides (
   weight_unit TEXT NOT NULL CHECK (weight_unit IN ('g', 'kg', 'lb', 'oz')),
   grams_per_inventory_unit REAL NOT NULL CHECK (grams_per_inventory_unit > 0)
 );
+
+CREATE TABLE IF NOT EXISTS ingredient_package_sizes (
+  ingredient_id INTEGER PRIMARY KEY REFERENCES ingredients(id) ON DELETE CASCADE,
+  inventory_uom TEXT NOT NULL,
+  package_weight REAL NOT NULL CHECK (package_weight > 0),
+  weight_unit TEXT NOT NULL CHECK (weight_unit IN ('g', 'kg', 'lb', 'oz')),
+  grams_per_inventory_unit REAL NOT NULL CHECK (grams_per_inventory_unit > 0)
+);
