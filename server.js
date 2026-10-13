@@ -2601,6 +2601,33 @@ app.get("/api/batch-ingredient-qty", async (req, res) => {
   }
 });
 
+app.get("/api/batch-ingredient-qty/xlsx", async (req, res) => {
+  try {
+    const report = await batchIngredientQtyReport(req.query);
+    const cleanName = report.product.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "production-batch";
+    const sheet = XLSX.utils.aoa_to_sheet([
+      ["Batch Ingredient Quantity"],
+      ["Production Batch", report.product.name],
+      ["Pieces Made", report.pieces],
+      [],
+      ["Ingredient", "Qty Per Piece", "Total Needed", "UOM"],
+      ...report.ingredients.map((row) => [
+        row.ingredient_name, row.quantity_per_unit, row.total_quantity, row.quantity_uom,
+      ]),
+    ]);
+    sheet["!cols"] = [{ wch: 42 }, { wch: 24 }, { wch: 20 }, { wch: 14 }];
+    sheet["!autofilter"] = { ref: `A5:D${5 + report.ingredients.length}` };
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Ingredient Quantities");
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${cleanName}-ingredient-qty.xlsx"`);
+    res.send(buffer);
+  } catch (error) {
+    fail(res, error, 400);
+  }
+});
+
 app.get("/api/batch-ingredient-qty/pdf", async (req, res) => {
   try {
     const report = await batchIngredientQtyReport(req.query);

@@ -29,7 +29,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20260729-batch-ingredient-qty-v23";
+const APP_VERSION = "20261013-batch-ingredient-export-v24";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -2640,7 +2640,9 @@ function renderBatchIngredientReport(report) {
     <div><span>Ingredients</span><strong>${report.ingredients.length}</strong></div>
   `;
   actions.hidden = false;
-  document.querySelector("#batch-ingredient-pdf").href = `/api/batch-ingredient-qty/pdf?product_id=${encodeURIComponent(report.product.id)}&pieces=${encodeURIComponent(report.pieces)}`;
+  for (const format of ["pdf", "xlsx"]) {
+    document.querySelector(`#batch-ingredient-${format}`).href = `/api/batch-ingredient-qty/${format}?product_id=${encodeURIComponent(report.product.id)}&pieces=${encodeURIComponent(report.pieces)}`;
+  }
   tableContainer.innerHTML = table([
     { label: "Ingredient", key: "ingredient_name" },
     { label: "Qty Per Piece", numeric: true, value: (row) => qty(row.quantity_per_unit) },
