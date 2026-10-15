@@ -2023,7 +2023,3 @@ pre {
 #forecast-search-help {
   flex-basis: 100%;
 }
-
-.inventory-review-dialog { width: min(1200px, 94vw); max-height: 90vh; overflow: auto; border: 1px solid #b8c6d5; border-radius: 12px; padding: 24px; }
-.inventory-review-dialog::backdrop { background: rgb(0 0 0 / 45%); }
-.inventory-review-dialog > button { margin: 0 8px 16px 0; }
