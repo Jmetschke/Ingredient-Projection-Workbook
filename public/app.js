@@ -29,7 +29,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20261015-inventory-package-import-v25";
+const APP_VERSION = "20261015-inventory-review-v26";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -1631,6 +1631,41 @@ function renderForecastSummary(rows) {
   `;
 }
 
+function inventoryNeedsReview(row) {
+  return !row.ingredient_id || (row.quantity_uom !== "each" && row.current_qty_grams == null);
+}
+
+async function openInventoryUploadReview() {
+  const section = document.querySelector("#inventory-mapping");
+  const placeholder = document.createComment("inventory mapping tab");
+  section.before(placeholder);
+  const dialog = document.createElement("dialog");
+  dialog.className = "inventory-review-dialog";
+  dialog.setAttribute("aria-label", "Review uploaded inventory");
+  dialog.innerHTML = `<h2>Review uploaded inventory</h2>
+    <p>Correct the ingredient match and missing package weights below, or ignore an item for this upload. Saved corrections are remembered for future uploads.</p>
+    <button type="button" data-review-close>Done / Review later</button>
+    <button type="button" data-review-all>View all mapped information</button>`;
+  document.body.append(dialog);
+  dialog.append(section);
+  section.style.display = "block";
+  document.querySelector("#inventory-mapping-filter").value = "";
+  dialog.addEventListener("close", () => {
+    placeholder.replaceWith(section);
+    section.style.removeProperty("display");
+    dialog.remove();
+    const refresh = dialog.dataset.viewAll ? activate("inventory-mapping") : renderForecast();
+    refresh.catch(error => setMessage("#forecast-inventory-message", error.message, "error"));
+  }, { once: true });
+  dialog.querySelector("[data-review-close]").onclick = () => dialog.close();
+  dialog.querySelector("[data-review-all]").onclick = () => {
+    dialog.dataset.viewAll = "true";
+    dialog.close();
+  };
+  dialog.showModal();
+  await renderInventoryMapping();
+}
+
 async function renderInventoryMapping() {
   const host = document.querySelector("#inventory-mapping-table");
   const form = document.querySelector("#inventory-mapping-editor");
@@ -1641,8 +1676,9 @@ async function renderInventoryMapping() {
     const format = (value) => Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
     const draw = () => {
       const search = document.querySelector("#inventory-mapping-filter").value.toLowerCase();
-      const rows = data.rows.filter((row) => `${row.uploaded_name} ${row.ingredient_name}`.toLowerCase().includes(search));
-      host.innerHTML = !data.rows.length ? '<div class="empty">Upload an inventory PDF from Ingredient Forecast to review its mappings here.</div>' : table([
+      const reviewing = Boolean(host.closest("dialog"));
+      const rows = data.rows.filter(row => !reviewing || inventoryNeedsReview(row)).filter((row) => `${row.uploaded_name} ${row.ingredient_name}`.toLowerCase().includes(search));
+      host.innerHTML = reviewing && !rows.length ? '<p role="status">No items need review. Choose View all mapped information to check automatic matches.</p>' : !data.rows.length ? '<div class="empty">Upload an inventory PDF from Ingredient Forecast to review its mappings here.</div>' : table([
         { label: "Uploaded item", value: (row) => escapeHtml(row.uploaded_name) },
         { label: "Matched ingredient", value: (row) => escapeHtml(row.ingredient_name || "Unmatched") },
         { label: "Match", value: (row) => escapeHtml(row.match_method) },
@@ -1651,8 +1687,21 @@ async function renderInventoryMapping() {
         { label: "Grams per package", value: (row) => row.grams_per_inventory_unit == null ? "—" : format(row.grams_per_inventory_unit), numeric: true },
         { label: "Total inventory", value: (row) => row.quantity_uom === "each" ? `${format(row.current_qty)} each` : row.current_qty_grams == null ? "Conversion needed" : `${format(row.current_qty_grams)} g`, numeric: true },
         { label: "Weight source", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Manual inventory" : row.unit_override ? "Saved correction" : "App default — review" },
-        { label: "Action", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Edit in Ingredient Forecast" : `<button type="button" class="small" data-edit-mapping="${row.id}">Edit</button>` },
+        { label: "Action", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Edit in Ingredient Forecast" : `<button type="button" class="small" data-edit-mapping="${row.id}">Categorize / Edit</button> <button type="button" class="small" data-ignore-mapping="${row.id}">Ignore for this upload</button>` },
       ], rows);
+      host.querySelectorAll("[data-ignore-mapping]").forEach(button => {
+        button.onclick = async () => {
+          button.disabled = true;
+          try {
+            await api(`/api/inventory-upload/${button.dataset.ignoreMapping}`, { method: "DELETE" });
+            await renderInventoryMapping();
+            setMessage("#inventory-mapping-message", "Ignored for this upload only. Future uploads will still include this item.", "success");
+          } catch (error) {
+            setMessage("#inventory-mapping-message", error.message, "error");
+            button.disabled = false;
+          }
+        };
+      });
       host.querySelectorAll("[data-edit-mapping]").forEach((button) => {
         button.onclick = () => edit(data.rows.find((row) => String(row.id) === button.dataset.editMapping));
       });
@@ -1786,6 +1835,7 @@ async function uploadForecastInventoryPdf(input) {
     const payload = await res.json();
     if (!payload.ok) throw new Error(payload.error);
     await renderForecast();
+    if (payload.data.rows.some(inventoryNeedsReview)) await openInventoryUploadReview();
     const missingWeights = payload.data.rows.filter(row => row.quantity_uom !== 'each' && row.current_qty_grams == null);
     setMessage(
       "#forecast-inventory-message",

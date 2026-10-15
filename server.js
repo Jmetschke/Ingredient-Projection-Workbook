@@ -2059,8 +2059,8 @@ app.post("/api/inventory-upload/:id/map", async (req, res) => {
 
 app.delete("/api/inventory-upload/:id", async (req, res) => {
   try {
-    const result = await run("DELETE FROM latest_inventory_rows WHERE id = ? AND ingredient_id IS NULL", [Number(req.params.id)]);
-    if (!result.changes) return fail(res, new Error("Unmatched inventory suggestion not found"), 404);
+    const result = await run("DELETE FROM latest_inventory_rows WHERE id = ?", [Number(req.params.id)]);
+    if (!result.changes) return fail(res, new Error("Inventory upload item not found"), 404);
     ok(res, { id: Number(req.params.id) });
   } catch (error) {
     fail(res, error);
