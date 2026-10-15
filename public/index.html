@@ -125,7 +125,7 @@
           <div id="dashboard-package-message" class="source-note" role="status"></div>
           <section id="dashboard-package-editor" class="manual-inventory-panel" hidden>
             <h3>Inventory Package Sizes</h3>
-            <p class="source-note">Define the weight of one bag, jar, box, or unit for the printed inventory report. Saved manual sizes stay in effect after uploads. Inventory grams remain unchanged.</p>
+            <p class="source-note">Define the weight of one bag, jar, box, or unit. For ingredients imported as package counts, this weight converts those counts into grams. For stock already measured in grams, it controls the printed package count. Saved sizes stay in effect after uploads; item-specific Inventory Mapping corrections take priority.</p>
             <form id="dashboard-package-form" class="inline-form">
               <label class="form-field"><span>Inventory item</span><select name="package_ingredient_id" required></select></label>
               <label class="form-field"><span>Package name (singular)</span><input name="inventory_uom" placeholder="unit, bag, jar, box" maxlength="100" required></label>
@@ -598,6 +598,6 @@
 
     </main>
 
-    <script src="/app.js?v=20261013-batch-ingredient-export-v24"></script>
+    <script src="/app.js?v=20261015-inventory-package-import-v25"></script>
   </body>
 </html>

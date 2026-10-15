@@ -328,7 +328,14 @@ function inventoryConversionForName(name) {
 }
 
 function withInventoryConversion(row, matchedName = "", override = null) {
-  const conversion = override || inventoryConversionForName(matchedName) || inventoryConversionForName(row.uploaded_name);
+  // Manual adjustments already contain BOM quantities, not imported package counts.
+  if (String(row.match_method || "").startsWith("manual_")) return row;
+  const defaultConversion = inventoryConversionForName(matchedName) || inventoryConversionForName(row.uploaded_name);
+  const legacyGramAssumption = defaultConversion?.package_quantity
+    && Number(row.grams_per_inventory_unit) === 1
+    && /^(g|grams?)$/i.test(row.inventory_uom || "");
+  const storedConversion = !legacyGramAssumption && Number(row.grams_per_inventory_unit) > 0 ? row : null;
+  const conversion = override || storedConversion || defaultConversion;
   const gramsPerInventoryUnit = Number(conversion?.grams_per_inventory_unit);
   const hasGramConversion = row.quantity_uom !== "each" && Number.isFinite(gramsPerInventoryUnit) && gramsPerInventoryUnit > 0;
   const eachPerInventoryUnit = Number(conversion?.each_per_inventory_unit);
@@ -342,7 +349,7 @@ function withInventoryConversion(row, matchedName = "", override = null) {
       ? Number(row.current_qty || 0) * eachPerInventoryUnit
       : row.current_qty,
     quantity_uom: hasEachConversion ? "each" : row.quantity_uom,
-    inventory_uom: conversion?.inventory_uom || row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
+    inventory_uom: conversion?.inventory_uom || row.inventory_uom || "Unknown unit",
     grams_per_inventory_unit: hasGramConversion ? gramsPerInventoryUnit : null,
     current_qty_grams: hasGramConversion ? Number(row.current_qty || 0) * gramsPerInventoryUnit : null,
   };
@@ -416,7 +423,6 @@ function rowsFromDistruInventoryPdf(buffer) {
       && !finishedGoodBrands.has(normalizedBrand)
       && !finishedGoodNamePattern.test(row.uploaded_name)
       && !["name", "total"].includes(normalizedName)
-      && !(normalizedName.split(" ").length <= 1 && Number(row.current_qty || 0) === 0)
       && normalizedName.length > 2;
   }).map(({ page, y, brand, ...row }) => {
     return row;
@@ -470,7 +476,8 @@ function matchInventoryRows(rows, ingredients, aliasIngredients = new Map(), uni
       match_method: match?.method || "unmatched",
       quantity_uom: match?.ingredient.purchase_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
     };
-    const override = unitOverrides.get(normalizeMatchText(row.uploaded_name));
+    const override = unitOverrides.get(normalizeMatchText(row.uploaded_name))
+      || unitOverrides.get(`ingredient:${matchedRow.ingredient_id}`);
     return withInventoryConversion(matchedRow, match?.ingredient.name,
       override?.ingredient_id === matchedRow.ingredient_id && matchedRow.quantity_uom !== "each" ? override : null);
   });
@@ -534,11 +541,15 @@ async function latestInventoryRows() {
     FROM latest_inventory_rows
     ORDER BY uploaded_name
   `);
-  return rows.map((row) => (
-    row.current_qty_grams == null && row.ingredient_name
-      ? withInventoryConversion(row, row.ingredient_name)
-      : row
-  ));
+  const overrides = await inventoryUnitOverrides();
+  return rows.map((row) => {
+    const override = overrides.get(normalizeMatchText(row.uploaded_name))
+      || overrides.get(`ingredient:${row.ingredient_id}`);
+    const conversion = inventoryConversionForName(row.ingredient_name) || inventoryConversionForName(row.uploaded_name);
+    if (!override && !conversion?.package_quantity && row.current_qty_grams != null) return row;
+    return withInventoryConversion(row, row.ingredient_name,
+      override?.ingredient_id === row.ingredient_id ? override : null);
+  });
 }
 
 async function activeMasterIngredients() {
@@ -563,7 +574,18 @@ async function inventoryAliasIngredients() {
 
 async function inventoryUnitOverrides() {
   const rows = await all("SELECT * FROM inventory_unit_overrides");
-  return new Map(rows.map((row) => [row.normalized_alias, row]));
+  const overrides = new Map(rows.map((row) => [row.normalized_alias, row]));
+  const sizes = await all(`SELECT p.*, i.name FROM ingredient_package_sizes p
+    JOIN ingredients i ON i.id = p.ingredient_id`);
+  for (const size of sizes) {
+    const conversion = inventoryConversionForName(size.name);
+    // Display package sizes do not redefine genuine gram-based inventory.
+    // For known package counts, they also supply the missing import weight.
+    if (conversion?.package_quantity) {
+      overrides.set(`ingredient:${size.ingredient_id}`, size);
+    }
+  }
+  return overrides;
 }
 
 async function replaceLatestInventoryRows(rows) {
@@ -598,6 +620,7 @@ async function rematchLatestInventoryRows() {
     current_qty: row.current_qty,
     quantity_uom: row.quantity_uom || guessInventoryUom(row.uploaded_name),
     inventory_uom: row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
+    grams_per_inventory_unit: row.grams_per_inventory_unit,
   }));
   const matched = matchInventoryRows(rawRows, await activeMasterIngredients(), await inventoryAliasIngredients(), await inventoryUnitOverrides());
   await replaceLatestInventoryRows([...matched, ...existingRows.filter((row) => String(row.match_method || "").startsWith("manual_"))]);
@@ -985,10 +1008,10 @@ async function scheduledIngredientUsageForecast(query = {}) {
     const isEach = rowUom === "each";
     const currentInventoryValue = isEach
       ? inventory?.current_qty ?? null
-      : inventory?.current_qty_grams ?? inventory?.current_qty ?? null;
+      : inventory?.current_qty_grams ?? null;
     const currentInventoryGrams = isEach
       ? inventory?.current_qty ?? null
-      : inventory?.current_qty_grams ?? inventory?.current_qty ?? null;
+      : inventory?.current_qty_grams ?? null;
     const priorUsage = priorUsageByKey.get(`${row.ingredient_id}:${rowUom}`) || 0;
     const startingInventoryValue = currentInventoryValue == null
       ? null
@@ -1020,9 +1043,7 @@ async function scheduledIngredientUsageForecast(query = {}) {
       order_units_needed: neededToOrderQty == null || !hasOrderConversion
         ? null
         : Math.ceil(neededToOrderQty / unitsPerOrderUnit),
-      order_unit_uom: inventory?.match_method === "alias"
-        ? inventory.inventory_uom || conversion?.inventory_uom || ""
-        : conversion?.inventory_uom || inventory?.inventory_uom || "",
+      order_unit_uom: inventory?.inventory_uom || conversion?.inventory_uom || "",
       current_inventory_uom: isEach ? "each" : "grams",
       inventory_uom: inventory?.quantity_uom || row.quantity_uom,
       inventory_source_uom: inventory?.inventory_uom || "",
@@ -1406,13 +1427,13 @@ app.get("/api/ingredients", async (req, res) => {
       ...ingredient,
       current_inventory_count: ingredient.purchase_uom === "each"
         ? inventory?.each ?? null
-        : inventory?.grams ?? inventory?.each ?? null,
+        : inventory?.grams ?? null,
     };
   }));
 });
 
-// Report package sizes are independent of upload quantity conversions: editing
-// a package size must never multiply or replace the grams already on hand.
+// Display sizes preserve gram-based stock. For ingredients known to be imported
+// as package counts, the saved size also resolves their import conversion.
 app.get("/api/inventory-package-sizes", async (req, res) => {
   try {
     const rows = await all(`
@@ -1429,6 +1450,7 @@ app.get("/api/inventory-package-sizes", async (req, res) => {
     ]);
     ok(res, rows.map((row) => ({
       ...withBomUom(row),
+      import_package_quantity: Boolean(inventoryConversionForName(row.name)?.package_quantity),
       ...resolveInventoryPackageSize(row, overrides, inventoryRows, inventoryConversionForName(row.name)),
     })));
   } catch (error) { fail(res, error); }
@@ -1760,8 +1782,8 @@ app.get("/api/inventory-upload", async (req, res) => {
     const overrides = await inventoryUnitOverrides();
     ok(res, {
       rows: (await latestInventoryRows()).map((row) => {
-        const override = overrides.get(normalizeMatchText(row.uploaded_name));
-        return { ...row, unit_override: row.match_method === "alias" && override?.ingredient_id === row.ingredient_id ? override : null };
+        const override = overrides.get(normalizeMatchText(row.uploaded_name)) || overrides.get(`ingredient:${row.ingredient_id}`);
+        return { ...row, unit_override: !String(row.match_method || "").startsWith("manual_") && override?.ingredient_id === row.ingredient_id ? override : null };
       }),
     });
   } catch (error) {
@@ -1808,6 +1830,7 @@ app.post("/api/inventory-adjustments", async (req, res) => {
         ? "Add quantity must be greater than zero"
         : "Update quantity must be zero or greater"), 400);
     }
+    const inventoryOverrides = await inventoryUnitOverrides();
     const result = await withTransaction(async (tx) => {
       const rawIngredient = await tx.one(
         "SELECT id, name, purchase_uom, ingredient_type FROM ingredients WHERE id = ? AND is_master = 1 AND active = 1",
@@ -1827,18 +1850,22 @@ app.post("/api/inventory-adjustments", async (req, res) => {
                inventory_uom,
                grams_per_inventory_unit,
                current_qty_grams,
-               ingredient_name
+               ingredient_name,
+               match_method
         FROM latest_inventory_rows
         WHERE ingredient_id = ?
            OR (ingredient_id IS NULL AND lower(COALESCE(NULLIF(ingredient_name, ''), uploaded_name)) = lower(?))
       `, [ingredient.id, ingredient.name]);
       const previousQty = existingRows.reduce((sum, row) => {
-        const normalized = row.current_qty_grams == null
-          ? withInventoryConversion(row, ingredient.name)
+        const override = inventoryOverrides.get(normalizeMatchText(row.uploaded_name))
+          || inventoryOverrides.get(`ingredient:${ingredient.id}`);
+        const normalized = row.current_qty_grams == null || inventoryConversion?.package_quantity || override
+          ? withInventoryConversion(row, ingredient.name, override?.ingredient_id === ingredient.id ? override : null)
           : row;
         const value = quantityUom === "each"
           ? normalized.current_qty
-          : normalized.current_qty_grams ?? normalized.current_qty;
+          : normalized.current_qty_grams;
+        if (hasAdd && value == null) throw new Error("Set the imported package weight in Inventory Mapping before adding inventory, or use Update to enter the full total in grams.");
         return sum + Number(value || 0);
       }, 0);
       const adjustmentType = hasAdd ? "add" : "update";

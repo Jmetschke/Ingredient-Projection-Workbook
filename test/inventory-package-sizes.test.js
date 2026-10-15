@@ -110,6 +110,28 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     assert.ok(printed.includes('0.758 (10kg Box)'));
     assert.ok(!printed.includes('Package size not set'));
 
+    await run("INSERT INTO ingredients (id, name, purchase_uom) VALUES (4, 'clove', 'grams'), (5, 'bees wax', 'grams')");
+    // Repair previously imported package counts without reinterpreting manual grams.
+    await ctx.replaceLatestInventoryRows([
+      { uploaded_name: 'Clove', ingredient_id: 4, ingredient_name: 'clove', quantity_uom: 'grams', current_qty: 0.62, current_qty_grams: 0.62, grams_per_inventory_unit: 1, inventory_uom: 'Gram' },
+      { uploaded_name: 'Bees Wax', ingredient_id: 5, ingredient_name: 'bees wax', quantity_uom: 'grams', current_qty: 0.9384, current_qty_grams: 0.9384, grams_per_inventory_unit: 1, inventory_uom: 'Gram' },
+    ]);
+    let stock = await ctx.latestInventoryRows();
+    assert.equal(stock.find(row => row.ingredient_id === 4).current_qty_grams, 2170);
+    assert.equal(stock.find(row => row.ingredient_id === 5).current_qty_grams, null);
+    await routes.get('PUT /api/inventory-package-sizes/:id')({ params: { id: 5 }, body: { inventory_uom: 'Test box', package_weight: 10, weight_unit: 'kg' } }, {});
+    assert.equal(response.status, 200);
+    stock = await ctx.latestInventoryRows();
+    assert.equal(stock.find(row => row.ingredient_id === 5).current_qty_grams, 9384);
+    assert.equal(stock.find(row => row.ingredient_id === 5).current_qty, 0.9384);
+    ctx.rowsFromDistruInventoryPdf = () => [{ uploaded_name: 'Bees Wax', current_qty: 0.5, quantity_uom: 'grams' }];
+    await routes.get('POST /api/inventory-upload')({ body: Buffer.from('fixture') }, {});
+    assert.equal(response.data.rows[0].current_qty_grams, 5000);
+    await ctx.replaceLatestInventoryRows([
+      { uploaded_name: 'Bees Wax', ingredient_id: 5, ingredient_name: 'bees wax', quantity_uom: 'grams', current_qty: 500, current_qty_grams: 500, grams_per_inventory_unit: 1, inventory_uom: 'grams', match_method: 'manual_update' },
+    ]);
+    assert.equal((await ctx.latestInventoryRows())[0].current_qty_grams, 500);
+
   } finally {
     db.close();
     fs.rmSync(directory, { recursive: true, force: true });

@@ -29,7 +29,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20261013-batch-ingredient-export-v24";
+const APP_VERSION = "20261015-inventory-package-import-v25";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -371,7 +371,9 @@ async function editDashboardPackageSizes(inventoryRows) {
       const format = value => Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
       const valid = gramsPerPackage > 0 && Number.isFinite(gramsPerPackage) && fields.inventory_uom.value.trim();
       document.querySelector('#dashboard-package-preview').textContent = valid
-        ? `1 ${fields.inventory_uom.value.trim()} = ${format(fields.package_weight.value)} ${fields.weight_unit.value} (${format(gramsPerPackage)} g). ${grams == null ? 'No current inventory recorded.' : `${format(grams)} g ÷ ${format(gramsPerPackage)} g = ${format(Number(grams) / gramsPerPackage)} package units on hand.`}`
+        ? selectedItem()?.import_package_quantity
+          ? `1 ${fields.inventory_uom.value.trim()} = ${format(gramsPerPackage)} g. Imported package counts are multiplied by this weight to calculate grams. Any item-specific correction in Inventory Mapping takes priority. Manual gram adjustments stay unchanged.`
+          : `1 ${fields.inventory_uom.value.trim()} = ${format(fields.package_weight.value)} ${fields.weight_unit.value} (${format(gramsPerPackage)} g). ${grams == null ? 'No current inventory recorded.' : `${format(grams)} g ÷ ${format(gramsPerPackage)} g = ${format(Number(grams) / gramsPerPackage)} package units on hand.`}`
         : 'Enter a package name and weight to preview the conversion.';
     };
     const populate = () => {
@@ -406,6 +408,7 @@ async function editDashboardPackageSizes(inventoryRows) {
           body: JSON.stringify({ inventory_uom: fields.inventory_uom.value, package_weight: fields.package_weight.value, weight_unit: fields.weight_unit.value }),
         });
         Object.assign(item, saved, { package_size_source: "manual" });
+        await renderDashboard();
         populate();
         setMessage('#dashboard-package-message', `Saved package size for ${item.name}. Future uploads will preserve this manual override.`, 'success');
       } catch (error) {
@@ -1718,12 +1721,16 @@ function renderForecastUnmatchedInventory() {
   const host = document.querySelector("#forecast-unmatched-inventory");
   const rows = state.forecastUnmatchedInventoryRows || [];
   const uploadedCount = state.forecastInventoryRows.length;
+  const missingWeights = state.forecastInventoryRows.filter(row => row.quantity_uom !== 'each' && row.current_qty_grams == null);
+  const weightWarning = missingWeights.length
+    ? `<div class="source-note">Package weights needed: ${missingWeights.map(row => escapeHtml(row.uploaded_name)).join(', ')}. Review these items in Inventory Mapping. Their uploaded quantities are not counted as grams.</div>`
+    : '';
   if (!uploadedCount) {
     host.innerHTML = `<div class="empty small-empty">No inventory valuation PDF has been uploaded yet.</div>`;
     return;
   }
   if (!rows.length) {
-    host.innerHTML = `<div class="source-note success">Current inventory loaded. All ${uploadedCount} uploaded rows matched the master ingredient list.</div>`;
+    host.innerHTML = `${weightWarning}<div class="source-note">All ${uploadedCount} uploaded rows matched the master ingredient list.</div>`;
     return;
   }
   const ingredientOptions = state.ingredients
@@ -1731,7 +1738,7 @@ function renderForecastUnmatchedInventory() {
     .map((ingredient) => `<option value="${ingredient.id}">${escapeHtml(ingredient.name)}</option>`)
     .join("");
   host.innerHTML = `
-    <div class="unmatched-panel">
+    ${weightWarning}<div class="unmatched-panel">
       <div>
         <h3>Unmatched Inventory Items</h3>
         <p>${rows.length} uploaded item${rows.length === 1 ? "" : "s"} did not match the master ingredient list.</p>
@@ -1779,10 +1786,11 @@ async function uploadForecastInventoryPdf(input) {
     const payload = await res.json();
     if (!payload.ok) throw new Error(payload.error);
     await renderForecast();
+    const missingWeights = payload.data.rows.filter(row => row.quantity_uom !== 'each' && row.current_qty_grams == null);
     setMessage(
       "#forecast-inventory-message",
-      `Loaded ${payload.data.rows.length} inventory rows. ${payload.data.matched} matched, ${payload.data.unmatched} unmatched.${payload.data.preserved_package_sizes?.length ? ` Manual package sizes kept for: ${payload.data.preserved_package_sizes.join(", ")}. Upload values did not replace these overrides.` : ""}`,
-      payload.data.unmatched ? "warning" : "success",
+      `Loaded ${payload.data.rows.length} inventory rows. ${payload.data.matched} matched, ${payload.data.unmatched} unmatched.${missingWeights.length ? ` Package weights needed for: ${missingWeights.map(row => row.uploaded_name).join(', ')}. Enter their weights in Inventory Mapping; these quantities are not treated as grams.` : ''}${payload.data.preserved_package_sizes?.length ? ` Manual package sizes kept for: ${payload.data.preserved_package_sizes.join(", ")}. Upload values did not replace these overrides.` : ""}`,
+      payload.data.unmatched || missingWeights.length ? "warning" : "success",
     );
   } catch (error) {
     setMessage("#forecast-inventory-message", error.message, "error");

@@ -24,7 +24,7 @@ async function inventoryResponse(ingredients, inventory) {
   return result;
 }
 
-test('inventory count uses recorded quantities without a gram conversion and matches by name', async () => {
+test('inventory count does not label unresolved package counts as grams', async () => {
   const rows = await inventoryResponse([
     { id: 1, name: 'Flour', purchase_uom: 'grams' },
     { id: 2, name: 'Sugar', purchase_uom: 'grams' },
@@ -35,7 +35,7 @@ test('inventory count uses recorded quantities without a gram conversion and mat
     { ingredient_id: null, uploaded_name: 'Sugar', current_qty: 20, current_qty_grams: null },
     { ingredient_id: 3, current_qty: 0, current_qty_grams: null },
   ]);
-  assert.deepEqual(Array.from(rows, row => row.current_inventory_count), [125, 20, 0, null]);
+  assert.deepEqual(Array.from(rows, row => row.current_inventory_count), [null, null, 0, null]);
 
   let html = '';
   const context = vm.createContext({
@@ -46,7 +46,7 @@ test('inventory count uses recorded quantities without a gram conversion and mat
   vm.runInContext(client.slice(client.indexOf('function inventoryPackageInfo('), client.indexOf('async function editDashboardPackageSizes(')), context);
   vm.runInContext(client.slice(client.indexOf('async function printInventoryCountSheet('), client.indexOf('async function renderFormulas(')), context);
   await context.printInventoryCountSheet(rows.map(row => ({ id: row.id })));
-  for (const quantity of ['125', '20', '0', '—']) {
+  for (const quantity of ['0', '—']) {
     assert.ok(html.includes(`<td class="numeric">${quantity}</td>`));
   }
   const today = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date());

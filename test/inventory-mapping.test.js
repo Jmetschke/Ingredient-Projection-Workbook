@@ -32,7 +32,7 @@ test('invalid weights and unknown units cannot be saved', () => {
   assert.throws(() => inventoryWeightConversion({ inventory_uom: '', package_weight: 1, weight_unit: 'g' }));
 });
 
-test('saved package weight overrides the bees wax one-gram default on each upload', () => {
+test('saved package weight converts bees wax package counts on each upload', () => {
   // Example weight for testing only; the actual box weight must be supplied by the user.
   const override = { ...inventoryWeightConversion({ inventory_uom: 'Box', package_weight: 10, weight_unit: 'kg' }), ingredient_id: 42 };
   const aliases = new Map([['bees wax', ingredient]]);
@@ -48,7 +48,7 @@ test('saved package weight overrides the bees wax one-gram default on each uploa
 
 test('a weight saved for a different ingredient is not applied when remapping', () => {
   const [matched] = context.matchInventoryRows([row], [ingredient], new Map(), new Map([['bees wax', { ingredient_id: 99, grams_per_inventory_unit: 10000 }]]));
-  assert.equal(matched.current_qty_grams, 2.1);
+  assert.equal(matched.current_qty_grams, null);
 });
 
 test('each items remain counts and do not gain gram totals', () => {
@@ -57,4 +57,32 @@ test('each items remain counts and do not gain gram totals', () => {
   assert.equal(converted.current_qty_grams, null);
   assert.equal(context.withInventoryConversion(converted, 'Whoppie Cookie').current_qty, 2400);
   assert.equal(context.withInventoryConversion({ current_qty: 3, quantity_uom: 'each' }, 'bees wax').current_qty_grams, null);
+});
+
+test('clove packages convert to grams and repair the legacy one-gram assumption', () => {
+  const clove = { uploaded_name: 'Clove', current_qty: 0.62, quantity_uom: 'grams' };
+  assert.equal(context.withInventoryConversion(clove, 'clove').current_qty_grams, 2170);
+  const legacy = { ...clove, inventory_uom: 'Gram', grams_per_inventory_unit: 1, current_qty_grams: 0.62 };
+  assert.equal(context.withInventoryConversion(legacy, 'clove').current_qty_grams, 2170);
+  const converted = context.withInventoryConversion(legacy, 'clove');
+  assert.equal(context.withInventoryConversion(converted, 'clove').current_qty_grams, 2170);
+  assert.equal(converted.current_qty, 0.62);
+});
+
+test('unverified package weights remain unresolved instead of becoming grams', () => {
+  for (const name of ['bees wax', 'shea butter', 'eucalyptus', 'black pepper', 'copaiba']) {
+    const converted = context.withInventoryConversion({ uploaded_name: name, current_qty: 0.62,
+      quantity_uom: 'grams', inventory_uom: 'Gram', grams_per_inventory_unit: 1, current_qty_grams: 0.62 }, name);
+    assert.equal(converted.current_qty, 0.62);
+    assert.equal(converted.current_qty_grams, null);
+    assert.equal(converted.grams_per_inventory_unit, null);
+  }
+});
+
+test('saved package sizes resolve package imports, and manual gram adjustments stay grams', () => {
+  const size = { ingredient_id: 42, inventory_uom: 'box', grams_per_inventory_unit: 10000 };
+  const [matched] = context.matchInventoryRows([row], [ingredient], new Map(), new Map([['ingredient:42', size]]));
+  assert.equal(matched.current_qty_grams, 21000);
+  const manual = { ...row, current_qty: 500, current_qty_grams: 500, grams_per_inventory_unit: 1, inventory_uom: 'grams', match_method: 'manual_update' };
+  assert.equal(context.withInventoryConversion(manual, 'bees wax', size).current_qty_grams, 500);
 });
