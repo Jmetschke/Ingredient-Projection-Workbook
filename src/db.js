@@ -65,6 +65,12 @@ export async function initDb() {
     await execute("ALTER TABLE latest_velocity_rows ADD COLUMN projected_units REAL");
   }
   const inventoryColumns = await all("PRAGMA table_info(latest_inventory_rows)");
+  if (!inventoryColumns.some((column) => column.name === "source_qty")) {
+    await execute("ALTER TABLE latest_inventory_rows ADD COLUMN source_qty REAL");
+  }
+  if (!inventoryColumns.some((column) => column.name === "ignored_for_upload")) {
+    await execute("ALTER TABLE latest_inventory_rows ADD COLUMN ignored_for_upload INTEGER NOT NULL DEFAULT 0");
+  }
   if (!inventoryColumns.some((column) => column.name === "inventory_uom")) {
     await execute("ALTER TABLE latest_inventory_rows ADD COLUMN inventory_uom TEXT");
   }

@@ -47,7 +47,7 @@
         <button data-tab="forecast">Ingredient Forecast</button>
         <button data-tab="shortage-report">Shortage Report</button>
         <button data-tab="inventory">Inventory</button>
-        <button data-tab="inventory-mapping">Inventory Mapping</button>
+        <button data-tab="inventory-mapping">Inventory Mapping &amp; Review</button>
         <button data-tab="formulas">Formula Manager</button>
       </nav>
     </aside>
@@ -300,6 +300,8 @@
             <div class="upload-instructions">Use Inventory Valuation Report from Distru, Flitering for 'Non-Mertc Items' only.</div>
           </div>
           <button id="forecast-inventory-clear" type="button">Clear Current Inventory</button>
+          <button id="forecast-inventory-review" type="button">Review Upload Issues</button>
+          <button id="forecast-inventory-mappings" type="button">View All Inventory Mappings</button>
           <div id="forecast-window" class="source-note"></div>
         </div>
         <div id="forecast-inventory-message" class="source-note"></div>
@@ -442,10 +444,16 @@
       </section>
 
       <section id="inventory-mapping" class="view">
-        <div class="section-head"><h2>Inventory Mapping</h2></div>
+        <div id="inventory-mapping-content">
+        <div class="section-head"><h2>Inventory Mapping &amp; Review</h2></div>
         <p>Review every uploaded item, including automatic matches. Edit an item to correct its ingredient, inventory quantity, or package weight. Saved matches and weights apply to future uploads of that item; quantity corrections apply to the current inventory only.</p>
         <p class="source-note">Known unit sizes are pre-filled when you choose Edit. Enter any missing size manually using the package label, weight, and weight unit fields. Saved sizes will be filled in on future uploads.</p>
+        <div class="mapping-toolbar">
         <label>Find uploaded item or ingredient <input id="inventory-mapping-filter" type="search" placeholder="Search, e.g. bees wax"></label>
+        <label>Show <select id="inventory-mapping-status"><option value="all">All uploaded items</option><option value="review">Needs review</option><option value="ignored">Ignored for this upload</option></select></label>
+        </div>
+        <p id="inventory-mapping-summary" role="status"></p>
+        <p class="source-note">Ignore excludes an item from this upload’s inventory totals and lets you restore it here. Delete from Upload removes its row entirely. Both apply only to this upload; master ingredients, recipes, and saved mappings are kept. PDF quantity shows the original count before conversion or corrections.</p>
         <div id="inventory-mapping-message" class="source-note" role="status"></div>
         <form id="inventory-mapping-editor" class="mapping-editor" hidden>
           <h3 id="inventory-mapping-name"></h3>
@@ -460,9 +468,21 @@
           <p id="inventory-mapping-preview" aria-live="polite"></p>
           <button type="submit">Save &amp; Remember</button>
           <button id="inventory-mapping-cancel" type="button">Cancel</button>
+          <button id="inventory-mapping-ignore" type="button">Ignore for This Upload</button>
         </form>
         <div id="inventory-mapping-table"></div>
+        </div>
       </section>
+
+      <dialog id="inventory-review-dialog" aria-labelledby="inventory-review-title">
+        <div class="section-head">
+          <h2 id="inventory-review-title">Review Inventory Upload</h2>
+          <button id="inventory-review-close" type="button">Done / Review Later</button>
+        </div>
+        <p>Match each item to an ingredient and enter its package weight, or ignore it for this upload. Suggested matches are included for review.</p>
+        <button id="inventory-review-all" type="button">Open All Mappings Tab</button>
+        <div id="inventory-review-content"></div>
+      </dialog>
 
       <section id="inventory" class="view">
         <div class="section-head">
@@ -598,6 +618,6 @@
 
     </main>
 
-    <script src="/app.js?v=20261015-inventory-package-import-v25"></script>
+    <script src="/app.js?v=20261015-inventory-mapping-delete-v27"></script>
   </body>
 </html>

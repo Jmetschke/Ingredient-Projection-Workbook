@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS latest_inventory_rows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   uploaded_name TEXT NOT NULL,
   current_qty REAL NOT NULL DEFAULT 0,
+  source_qty REAL,
+  ignored_for_upload INTEGER NOT NULL DEFAULT 0,
   quantity_uom TEXT,
   inventory_uom TEXT,
   grams_per_inventory_unit REAL,

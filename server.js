@@ -469,6 +469,7 @@ function matchInventoryRows(rows, ingredients, aliasIngredients = new Map(), uni
         : null;
     const matchedRow = {
       ...row,
+      source_qty: Object.hasOwn(row, "source_qty") ? row.source_qty : row.current_qty,
       ingredient_id: match?.ingredient.id || null,
       ingredient_name: match?.ingredient.name || "",
       ingredient_type: normalizeIngredientType(match?.ingredient.ingredient_type),
@@ -523,11 +524,13 @@ async function latestVelocityRows() {
   `);
 }
 
-async function latestInventoryRows() {
+async function latestInventoryRows(includeIgnored = false) {
   const rows = await all(`
     SELECT id,
            uploaded_name,
            current_qty,
+           source_qty,
+           ignored_for_upload,
            quantity_uom,
            inventory_uom,
            grams_per_inventory_unit,
@@ -539,8 +542,9 @@ async function latestInventoryRows() {
            match_method,
            uploaded_at
     FROM latest_inventory_rows
+    WHERE (? = 1 OR ignored_for_upload = 0)
     ORDER BY uploaded_name
-  `);
+  `, [includeIgnored ? 1 : 0]);
   const overrides = await inventoryUnitOverrides();
   return rows.map((row) => {
     const override = overrides.get(normalizeMatchText(row.uploaded_name))
@@ -593,12 +597,14 @@ async function replaceLatestInventoryRows(rows) {
   for (const row of rows) {
     await run(
       `INSERT INTO latest_inventory_rows
-        (uploaded_name, current_qty, quantity_uom, inventory_uom, grams_per_inventory_unit, current_qty_grams,
+        (uploaded_name, current_qty, source_qty, ignored_for_upload, quantity_uom, inventory_uom, grams_per_inventory_unit, current_qty_grams,
          ingredient_id, ingredient_name, ingredient_type, match_score, match_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.uploaded_name,
         row.current_qty ?? 0,
+        row.source_qty ?? null,
+        row.ignored_for_upload ? 1 : 0,
         row.quantity_uom || guessInventoryUom(row.uploaded_name),
         row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
         row.grams_per_inventory_unit ?? null,
@@ -614,10 +620,12 @@ async function replaceLatestInventoryRows(rows) {
 }
 
 async function rematchLatestInventoryRows() {
-  const existingRows = await latestInventoryRows();
+  const existingRows = await latestInventoryRows(true);
   const rawRows = existingRows.filter((row) => !String(row.match_method || "").startsWith("manual_")).map((row) => ({
     uploaded_name: row.uploaded_name,
     current_qty: row.current_qty,
+    source_qty: row.source_qty,
+    ignored_for_upload: row.ignored_for_upload,
     quantity_uom: row.quantity_uom || guessInventoryUom(row.uploaded_name),
     inventory_uom: row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
     grams_per_inventory_unit: row.grams_per_inventory_unit,
@@ -1781,7 +1789,7 @@ app.get("/api/inventory-upload", async (req, res) => {
   try {
     const overrides = await inventoryUnitOverrides();
     ok(res, {
-      rows: (await latestInventoryRows()).map((row) => {
+      rows: (await latestInventoryRows(true)).map((row) => {
         const override = overrides.get(normalizeMatchText(row.uploaded_name)) || overrides.get(`ingredient:${row.ingredient_id}`);
         return { ...row, unit_override: !String(row.match_method || "").startsWith("manual_") && override?.ingredient_id === row.ingredient_id ? override : null };
       }),
@@ -1853,8 +1861,8 @@ app.post("/api/inventory-adjustments", async (req, res) => {
                ingredient_name,
                match_method
         FROM latest_inventory_rows
-        WHERE ingredient_id = ?
-           OR (ingredient_id IS NULL AND lower(COALESCE(NULLIF(ingredient_name, ''), uploaded_name)) = lower(?))
+        WHERE ignored_for_upload = 0 AND (ingredient_id = ?
+           OR (ingredient_id IS NULL AND lower(COALESCE(NULLIF(ingredient_name, ''), uploaded_name)) = lower(?)))
       `, [ingredient.id, ingredient.name]);
       const previousQty = existingRows.reduce((sum, row) => {
         const override = inventoryOverrides.get(normalizeMatchText(row.uploaded_name))
@@ -1872,8 +1880,8 @@ app.post("/api/inventory-adjustments", async (req, res) => {
       const resultingQty = hasAdd ? previousQty + enteredQty : enteredQty;
       await tx.run(`
         DELETE FROM latest_inventory_rows
-        WHERE ingredient_id = ?
-           OR (ingredient_id IS NULL AND lower(COALESCE(NULLIF(ingredient_name, ''), uploaded_name)) = lower(?))
+        WHERE ignored_for_upload = 0 AND (ingredient_id = ?
+           OR (ingredient_id IS NULL AND lower(COALESCE(NULLIF(ingredient_name, ''), uploaded_name)) = lower(?)))
       `, [ingredient.id, ingredient.name]);
       await tx.run(`
         INSERT INTO latest_inventory_rows
@@ -2037,7 +2045,7 @@ app.post("/api/inventory-upload/:id/map", async (req, res) => {
       await tx.run(`
         UPDATE latest_inventory_rows
         SET current_qty = ?, quantity_uom = ?, inventory_uom = ?, grams_per_inventory_unit = ?, current_qty_grams = ?,
-            ingredient_id = ?, ingredient_name = ?, ingredient_type = ?, match_score = 1, match_method = 'alias'
+            ingredient_id = ?, ingredient_name = ?, ingredient_type = ?, match_score = 1, match_method = 'alias', ignored_for_upload = 0
         WHERE id = ?
       `, [
         mapped.current_qty,
@@ -2057,10 +2065,21 @@ app.post("/api/inventory-upload/:id/map", async (req, res) => {
   }
 });
 
+app.post("/api/inventory-upload/:id/ignore", async (req, res) => {
+  try {
+    if (typeof req.body.ignored !== "boolean") return fail(res, new Error("Choose whether to ignore this item."), 400);
+    const result = await run(`UPDATE latest_inventory_rows SET ignored_for_upload = ?
+      WHERE id = ? AND COALESCE(match_method, '') NOT LIKE 'manual_%'`,
+    [req.body.ignored ? 1 : 0, Number(req.params.id)]);
+    if (!result.changes) return fail(res, new Error("Uploaded inventory item not found"), 404);
+    ok(res, { id: Number(req.params.id), ignored_for_upload: req.body.ignored });
+  } catch (error) { fail(res, error, 400); }
+});
+
 app.delete("/api/inventory-upload/:id", async (req, res) => {
   try {
-    const result = await run("DELETE FROM latest_inventory_rows WHERE id = ? AND ingredient_id IS NULL", [Number(req.params.id)]);
-    if (!result.changes) return fail(res, new Error("Unmatched inventory suggestion not found"), 404);
+    const result = await run("DELETE FROM latest_inventory_rows WHERE id = ? AND COALESCE(match_method, '') NOT LIKE 'manual_%'", [Number(req.params.id)]);
+    if (!result.changes) return fail(res, new Error("Uploaded inventory item not found"), 404);
     ok(res, { id: Number(req.params.id) });
   } catch (error) {
     fail(res, error);

@@ -51,14 +51,17 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     await db.execute("INSERT INTO ingredients (id, name, purchase_uom) VALUES (1, 'Test ingredient', 'grams'), (2, 'Boxes', 'each'), (3, 'Chocolate Chips', 'grams')");
     const all = async (sql, args = []) => (await db.execute({ sql, args })).rows.map(row => ({ ...row }));
     const one = async (sql, args = []) => (await all(sql, args))[0];
-    const run = (sql, args = []) => db.execute({ sql, args });
+    const run = async (sql, args = []) => {
+      const result = await db.execute({ sql, args });
+      return { ...result, changes: result.rowsAffected };
+    };
     const routes = new Map();
     const register = method => (url, ...handlers) => routes.set(`${method} ${url}`, handlers.at(-1));
     let response;
     const ctx = vm.createContext({
       all, one, run, Buffer, inventoryWeightConversion, resolveInventoryPackageSize, bomUomForIngredient, INGREDIENT_UNIT_CONVERSION_BY_NAME,
       INGREDIENT_TYPES: new Set(['SB', 'Hijnx', 'SB/Hijnx']),
-      app: { get: register('GET'), put: register('PUT'), post: register('POST') },
+      app: { get: register('GET'), put: register('PUT'), post: register('POST'), delete: register('DELETE') },
       express: { raw: () => null },
       ok: (_res, data) => { response = { status: 200, data }; },
       fail: (_res, error, status = 500) => { response = { status, error: error.message }; },
@@ -74,6 +77,9 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     load('async function inventoryUnitOverrides(', 'async function rematchLatestInventoryRows(');
     load('app.get("/api/inventory-package-sizes"', 'app.post("/api/ingredients"');
     load('app.post("/api/inventory-upload",', 'app.post("/api/inventory-upload/rematch"');
+    load('app.post("/api/inventory-upload/:id/ignore"', 'app.delete("/api/inventory-upload/:id"');
+    load('app.delete("/api/inventory-upload/:id"', 'app.delete("/api/inventory-upload"');
+    load('async function rematchLatestInventoryRows(', 'function withVelocityBatchYield(');
     await ctx.replaceLatestInventoryRows([{ uploaded_name: 'Test ingredient', ingredient_id: 1, ingredient_name: 'Test ingredient', quantity_uom: 'grams', current_qty: 7000, current_qty_grams: 7000 }]);
     const save = body => routes.get('PUT /api/inventory-package-sizes/:id')({ params: { id: 1 }, body }, {});
     await save(size);
@@ -124,12 +130,55 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     stock = await ctx.latestInventoryRows();
     assert.equal(stock.find(row => row.ingredient_id === 5).current_qty_grams, 9384);
     assert.equal(stock.find(row => row.ingredient_id === 5).current_qty, 0.9384);
+    const waxRow = stock.find(row => row.ingredient_id === 5);
+    const ignore = ignored => routes.get('POST /api/inventory-upload/:id/ignore')({ params: { id: waxRow.id }, body: { ignored } }, {});
+    await ignore(true);
+    assert.equal(response.status, 200);
+    assert.equal((await ctx.latestInventoryRows()).some(row => row.ingredient_id === 5), false);
+    assert.equal((await ctx.latestInventoryRows(true)).find(row => row.ingredient_id === 5).ignored_for_upload, 1);
+    await ignore(false);
+    assert.equal((await ctx.latestInventoryRows()).find(row => row.ingredient_id === 5).current_qty_grams, 9384);
+    await ignore('yes');
+    assert.equal(response.status, 400);
+    await ignore(true);
+    await ctx.rematchLatestInventoryRows();
+    assert.equal((await ctx.latestInventoryRows(true)).find(row => row.ingredient_id === 5).ignored_for_upload, 1);
+    assert.equal((await ctx.latestInventoryRows()).some(row => row.ingredient_id === 5), false);
     ctx.rowsFromDistruInventoryPdf = () => [{ uploaded_name: 'Bees Wax', current_qty: 0.5, quantity_uom: 'grams' }];
     await routes.get('POST /api/inventory-upload')({ body: Buffer.from('fixture') }, {});
     assert.equal(response.data.rows[0].current_qty_grams, 5000);
+    assert.equal(response.data.rows[0].ignored_for_upload, 0);
+    assert.equal(response.data.rows[0].source_qty, 0.5);
+    const importedId = response.data.rows[0].id;
+    await run("INSERT INTO inventory_ingredient_aliases (alias, normalized_alias, ingredient_id) VALUES ('Bees Wax', 'bees wax', 5)");
+    const remove = id => routes.get('DELETE /api/inventory-upload/:id')({ params: { id } }, {});
+    await remove(importedId);
+    assert.equal(response.status, 200);
+    assert.equal((await ctx.latestInventoryRows(true)).length, 0);
+    assert.ok(await one('SELECT id FROM ingredients WHERE id = 5'));
+    assert.ok(await one("SELECT id FROM inventory_ingredient_aliases WHERE normalized_alias = 'bees wax'"));
+    assert.equal((await one('SELECT grams_per_inventory_unit FROM ingredient_package_sizes WHERE ingredient_id = 5')).grams_per_inventory_unit, 10000);
+    await remove(importedId);
+    assert.equal(response.status, 404);
+    await routes.get('POST /api/inventory-upload')({ body: Buffer.from('fixture') }, {});
+    assert.equal(response.data.rows[0].current_qty_grams, 5000);
+    const restoredId = response.data.rows[0].id;
+    await routes.get('POST /api/inventory-upload/:id/ignore')({ params: { id: restoredId }, body: { ignored: true } }, {});
+    await remove(restoredId);
+    assert.equal(response.status, 200);
+    assert.equal((await ctx.latestInventoryRows(true)).length, 0);
+    await ctx.replaceLatestInventoryRows([{ uploaded_name: 'Unmatched test item', current_qty: 2, quantity_uom: 'grams' }]);
+    await remove((await ctx.latestInventoryRows(true))[0].id);
+    assert.equal(response.status, 200);
     await ctx.replaceLatestInventoryRows([
       { uploaded_name: 'Bees Wax', ingredient_id: 5, ingredient_name: 'bees wax', quantity_uom: 'grams', current_qty: 500, current_qty_grams: 500, grams_per_inventory_unit: 1, inventory_uom: 'grams', match_method: 'manual_update' },
     ]);
+    assert.equal((await ctx.latestInventoryRows())[0].current_qty_grams, 500);
+    const manualRow = (await ctx.latestInventoryRows())[0];
+    await routes.get('POST /api/inventory-upload/:id/ignore')({ params: { id: manualRow.id }, body: { ignored: true } }, {});
+    assert.equal(response.status, 404);
+    await remove(manualRow.id);
+    assert.equal(response.status, 404);
     assert.equal((await ctx.latestInventoryRows())[0].current_qty_grams, 500);
 
   } finally {
