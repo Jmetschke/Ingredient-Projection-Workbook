@@ -334,7 +334,10 @@ function withInventoryConversion(row, matchedName = "", override = null) {
   const legacyGramAssumption = defaultConversion?.package_quantity
     && Number(row.grams_per_inventory_unit) === 1
     && /^(g|grams?)$/i.test(row.inventory_uom || "");
-  const storedConversion = !legacyGramAssumption && Number(row.grams_per_inventory_unit) > 0 ? row : null;
+  const obsoleteKilogramDefault = defaultConversion?.replaces_kilogram_default
+    && Number(row.grams_per_inventory_unit) === 1000
+    && /^(kg|kilograms?)$/i.test(row.inventory_uom || "");
+  const storedConversion = !legacyGramAssumption && !obsoleteKilogramDefault && Number(row.grams_per_inventory_unit) > 0 ? row : null;
   const conversion = override || storedConversion || defaultConversion;
   const gramsPerInventoryUnit = Number(conversion?.grams_per_inventory_unit);
   const hasGramConversion = row.quantity_uom !== "each" && Number.isFinite(gramsPerInventoryUnit) && gramsPerInventoryUnit > 0;
@@ -550,7 +553,7 @@ async function latestInventoryRows(includeIgnored = false) {
     const override = overrides.get(normalizeMatchText(row.uploaded_name))
       || overrides.get(`ingredient:${row.ingredient_id}`);
     const conversion = inventoryConversionForName(row.ingredient_name) || inventoryConversionForName(row.uploaded_name);
-    if (!override && !conversion?.package_quantity && row.current_qty_grams != null) return row;
+    if (!override && !conversion?.package_quantity && !conversion?.replaces_kilogram_default && row.current_qty_grams != null) return row;
     return withInventoryConversion(row, row.ingredient_name,
       override?.ingredient_id === row.ingredient_id ? override : null);
   });
@@ -1867,7 +1870,7 @@ app.post("/api/inventory-adjustments", async (req, res) => {
       const previousQty = existingRows.reduce((sum, row) => {
         const override = inventoryOverrides.get(normalizeMatchText(row.uploaded_name))
           || inventoryOverrides.get(`ingredient:${ingredient.id}`);
-        const normalized = row.current_qty_grams == null || inventoryConversion?.package_quantity || override
+        const normalized = row.current_qty_grams == null || inventoryConversion?.package_quantity || inventoryConversion?.replaces_kilogram_default || override
           ? withInventoryConversion(row, ingredient.name, override?.ingredient_id === ingredient.id ? override : null)
           : row;
         const value = quantityUom === "each"

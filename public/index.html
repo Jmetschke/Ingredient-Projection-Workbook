@@ -446,11 +446,13 @@
       <section id="inventory-mapping" class="view">
         <div id="inventory-mapping-content">
         <div class="section-head"><h2>Inventory Mapping &amp; Review</h2></div>
+        <p class="source-note">Open “How this item is parsed” to follow its PDF quantity → ingredient match → unit calculation → inventory result. Use Expand All Breakdowns to compare items.</p>
         <p>Review every uploaded item, including automatic matches. Edit an item to correct its ingredient, inventory quantity, or package weight. Saved matches and weights apply to future uploads of that item; quantity corrections apply to the current inventory only.</p>
         <p class="source-note">Known unit sizes are pre-filled when you choose Edit. Enter any missing size manually using the package label, weight, and weight unit fields. Saved sizes will be filled in on future uploads.</p>
         <div class="mapping-toolbar">
         <label>Find uploaded item or ingredient <input id="inventory-mapping-filter" type="search" placeholder="Search, e.g. bees wax"></label>
         <label>Show <select id="inventory-mapping-status"><option value="all">All uploaded items</option><option value="review">Needs review</option><option value="ignored">Ignored for this upload</option></select></label>
+        <button id="inventory-mapping-expand" type="button">Expand All Breakdowns</button>
         </div>
         <p id="inventory-mapping-summary" role="status"></p>
         <p class="source-note">Ignore excludes an item from this upload’s inventory totals and lets you restore it here. Delete from Upload removes its row entirely. Both apply only to this upload; master ingredients, recipes, and saved mappings are kept. PDF quantity shows the original count before conversion or corrections.</p>
@@ -618,6 +620,6 @@
 
     </main>
 
-    <script src="/app.js?v=20261015-inventory-mapping-delete-v27"></script>
+    <script src="/app.js?v=20261029-inventory-parsing-view-v29"></script>
   </body>
 </html>

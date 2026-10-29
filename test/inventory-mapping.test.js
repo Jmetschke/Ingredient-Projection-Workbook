@@ -86,3 +86,24 @@ test('saved package sizes resolve package imports, and manual gram adjustments s
   const manual = { ...row, current_qty: 500, current_qty_grams: 500, grams_per_inventory_unit: 1, inventory_uom: 'grams', match_method: 'manual_update' };
   assert.equal(context.withInventoryConversion(manual, 'bees wax', size).current_qty_grams, 500);
 });
+
+test('gram-based puck quantities are not multiplied; blue raspberry remains kilograms', () => {
+  for (const [name, quantity] of [['Green Apple Pucks', 470088], ['Mango Pucks', 199955], ['Pineapple Pectin', 197575], ['Watermelon Pucks', 11112.5]]) {
+    const raw = { uploaded_name: name, current_qty: quantity, quantity_uom: 'grams' };
+    const fresh = context.withInventoryConversion(raw);
+    assert.equal(fresh.current_qty_grams, quantity);
+    const legacy = { ...raw, inventory_uom: 'Kilogram', grams_per_inventory_unit: 1000, current_qty_grams: quantity * 1000 };
+    const repaired = context.withInventoryConversion(legacy);
+    assert.equal(repaired.current_qty_grams, quantity);
+    assert.equal(repaired.inventory_uom, 'Gram');
+    assert.equal(context.withInventoryConversion(repaired).current_qty_grams, quantity);
+  }
+  assert.equal(context.withInventoryConversion({ uploaded_name: 'Blue Raspberry Pucks', current_qty: 270, quantity_uom: 'grams' }).current_qty_grams, 270000);
+});
+
+test('puck default repair preserves explicit corrections and manual gram totals', () => {
+  const row = { uploaded_name: 'Mango Pucks', current_qty: 2, quantity_uom: 'grams', inventory_uom: 'Kilogram', grams_per_inventory_unit: 1000, current_qty_grams: 2000 };
+  assert.equal(context.withInventoryConversion(row, 'Mango Pucks', { inventory_uom: 'Kilogram', grams_per_inventory_unit: 1000 }).current_qty_grams, 2000);
+  assert.equal(context.withInventoryConversion({ ...row, inventory_uom: 'Custom box', grams_per_inventory_unit: 5000 }).current_qty_grams, 10000);
+  assert.equal(context.withInventoryConversion({ ...row, match_method: 'manual_update', current_qty: 2000, current_qty_grams: 2000 }).current_qty_grams, 2000);
+});

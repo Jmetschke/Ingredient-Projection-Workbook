@@ -29,7 +29,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20261015-inventory-mapping-delete-v27";
+const APP_VERSION = "20261029-inventory-parsing-view-v29";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -1637,6 +1637,37 @@ function renderForecastSummary(rows) {
   `;
 }
 
+function inventoryParsingBreakdown(row) {
+  const format = value => Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
+  const manual = String(row.match_method || '').startsWith('manual_');
+  const each = row.quantity_uom === 'each';
+  const match = { exact: 'Exact name match', fuzzy: 'Suggested name match — review', alias: 'Saved ingredient mapping', unmatched: 'No ingredient match', manual_add: 'Manual addition', manual_update: 'Manual total' }[row.match_method] || 'Stored match';
+  const total = each ? row.current_qty : row.current_qty_grams;
+  const unit = each ? 'each' : 'g';
+  const weightKnown = row.grams_per_inventory_unit != null && Number(row.grams_per_inventory_unit) > 0;
+  const calculation = manual
+    ? `${format(row.current_qty)} ${unit} entered directly; no package multiplication.`
+    : each
+      ? `${format(row.current_qty)} each is the current stored count after any count conversion or correction. No gram conversion applies.`
+      : weightKnown
+        ? `${format(row.current_qty)} × ${format(row.grams_per_inventory_unit)} g per source unit = ${format(row.current_qty_grams)} g`
+        : `${format(row.current_qty)} source units × unknown weight = total grams unknown`;
+  const source = manual ? 'Manual inventory entry'
+    : row.unit_override ? 'Saved package/unit correction'
+      : 'App or stored import conversion';
+  const result = row.ignored_for_upload ? 'Excluded: ignored for this upload.'
+    : !row.ingredient_id ? 'Not assigned to a master ingredient; match it before using it in that ingredient’s forecast.'
+      : total == null ? 'Inventory grams are unknown until a unit weight is provided.'
+        : `${format(total)} ${unit} contributes to this ingredient’s current inventory. Scheduled usage is deducted separately in the forecast.`;
+  return `<details class="inventory-parse-details"><summary>How this item is parsed</summary>
+    <ol class="inventory-parse-steps">
+      <li><strong>1. Source</strong><span>${escapeHtml(row.uploaded_name)}</span><span>${manual ? 'Manual entry, not a PDF row.' : row.source_qty == null ? 'Original PDF quantity was not recorded for this older upload.' : `PDF quantity: ${format(row.source_qty)}`}</span></li>
+      <li><strong>2. Ingredient match</strong><span>${escapeHtml(row.ingredient_name || 'Unmatched')}</span><span>${escapeHtml(match)}${row.ingredient_id ? ` · ${escapeHtml(row.ingredient_type || 'Uncategorized')}` : ''}</span></li>
+      <li><strong>3. Unit and calculation</strong><span>Unit used: ${escapeHtml(row.inventory_uom || 'Unknown')}</span><span>${escapeHtml(source)}${manual ? '' : ' — the PDF quantity alone does not establish the unit size.'}</span><b>${escapeHtml(calculation)}</b></li>
+      <li><strong>4. Inventory result</strong><span>${escapeHtml(result)}</span></li>
+    </ol></details>`;
+}
+
 function inventoryMappingNeedsReview(row) {
   return !row.ignored_for_upload && (!row.ingredient_id || row.match_method === 'fuzzy'
     || (row.quantity_uom !== 'each' && row.current_qty_grams == null));
@@ -1683,6 +1714,7 @@ async function renderInventoryMapping() {
       document.querySelector('#inventory-mapping-summary').textContent = `${data.rows.length} items · ${data.rows.filter(inventoryMappingNeedsReview).length} need review · ${data.rows.filter(row => row.ignored_for_upload).length} ignored for this upload`;
       host.innerHTML = !data.rows.length ? '<div class="empty">Upload an inventory PDF from Ingredient Forecast to review its mappings here.</div>' : !rows.length ? '<div class="empty">No items match this view. Choose All uploaded items to review other mappings.</div>' : table([
         { label: "Uploaded item", value: (row) => escapeHtml(row.uploaded_name) },
+        { label: "Parsing breakdown", value: inventoryParsingBreakdown },
         { label: "Action", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Edit in Ingredient Forecast" : `<div class="mapping-actions"><button type="button" class="small" data-edit-mapping="${row.id}">Edit / Categorize</button><button type="button" class="small secondary" data-ignore-mapping="${row.id}">${row.ignored_for_upload ? 'Restore' : 'Ignore for This Upload'}</button><button type="button" class="small danger" data-delete-mapping="${row.id}">Delete from Upload</button></div>` },
         { label: "Status", value: (row) => row.ignored_for_upload ? 'Ignored for this upload' : inventoryMappingNeedsReview(row) ? 'Needs review' : 'Included' },
         { label: "Matched ingredient", value: (row) => escapeHtml(row.ingredient_name || "Unmatched") },
@@ -1695,6 +1727,14 @@ async function renderInventoryMapping() {
         { label: "Total inventory", value: (row) => row.quantity_uom === "each" ? `${format(row.current_qty)} each` : row.current_qty_grams == null ? "Conversion needed" : `${format(row.current_qty_grams)} g`, numeric: true },
         { label: "Weight source", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Manual inventory" : row.unit_override ? "Saved correction" : "App default — review" },
       ], rows);
+      const expandButton = document.querySelector('#inventory-mapping-expand');
+      expandButton.textContent = 'Expand All Breakdowns';
+      expandButton.onclick = () => {
+        const details = [...host.querySelectorAll('.inventory-parse-details')];
+        const open = details.some(item => !item.open);
+        details.forEach(item => { item.open = open; });
+        expandButton.textContent = open ? 'Collapse All Breakdowns' : 'Expand All Breakdowns';
+      };
       host.querySelectorAll("[data-edit-mapping]").forEach((button) => {
         button.onclick = () => edit(data.rows.find((row) => String(row.id) === button.dataset.editMapping));
       });

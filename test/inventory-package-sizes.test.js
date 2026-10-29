@@ -181,6 +181,23 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     assert.equal(response.status, 404);
     assert.equal((await ctx.latestInventoryRows())[0].current_qty_grams, 500);
 
+    await run("INSERT INTO ingredients (id, name, purchase_uom) VALUES (6, 'Mango Pucks', 'grams'), (7, 'Green Apple Pucks', 'grams'), (8, 'Blue Raspberry Pucks', 'grams'), (9, 'Pineapple Pectin', 'grams'), (10, 'Watermelon Pucks', 'grams')");
+    const pucks = [[6, 'Mango Pucks', 199955], [7, 'Green Apple Pucks', 470088], [8, 'Blue Raspberry Pucks', 270], [9, 'Pineapple Pectin', 197575], [10, 'Watermelon Pucks', 11112.5]];
+    await ctx.replaceLatestInventoryRows(pucks.map(([id, name, qty]) => ({
+      uploaded_name: name, ingredient_id: id, ingredient_name: name, current_qty: qty, source_qty: qty,
+      quantity_uom: 'grams', inventory_uom: 'Kilogram', grams_per_inventory_unit: 1000,
+      current_qty_grams: qty * 1000, match_method: 'exact',
+    })));
+    const readPucks = async () => Object.fromEntries((await ctx.latestInventoryRows()).map(row => [row.ingredient_name, row.current_qty_grams]));
+    const expectedPucks = { 'Mango Pucks': 199955, 'Green Apple Pucks': 470088, 'Blue Raspberry Pucks': 270000, 'Pineapple Pectin': 197575, 'Watermelon Pucks': 11112.5 };
+    assert.deepEqual(await readPucks(), expectedPucks);
+    await ctx.rematchLatestInventoryRows();
+    assert.deepEqual(await readPucks(), expectedPucks);
+    ctx.rowsFromDistruInventoryPdf = () => pucks.map(([, name, qty]) => ({ uploaded_name: name, current_qty: qty, quantity_uom: 'grams' }));
+    await routes.get('POST /api/inventory-upload')({ body: Buffer.from('fixture') }, {});
+    assert.equal(response.status, 200);
+    assert.deepEqual(await readPucks(), expectedPucks);
+
   } finally {
     db.close();
     fs.rmSync(directory, { recursive: true, force: true });
