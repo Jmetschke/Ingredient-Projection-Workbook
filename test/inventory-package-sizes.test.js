@@ -193,10 +193,14 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     assert.deepEqual(await readPucks(), expectedPucks);
     await ctx.rematchLatestInventoryRows();
     assert.deepEqual(await readPucks(), expectedPucks);
-    ctx.rowsFromDistruInventoryPdf = () => pucks.map(([, name, qty]) => ({ uploaded_name: name, current_qty: qty, quantity_uom: 'grams' }));
+    const newPucks = { 'Mango Pucks': 270, 'Green Apple Pucks': 500, 'Blue Raspberry Pucks': 430, 'Pineapple Pectin': 377, 'Watermelon Pucks': 266 };
+    ctx.rowsFromDistruInventoryPdf = () => Object.entries(newPucks).map(([name, qty]) => ({ uploaded_name: name, current_qty: qty, quantity_uom: 'grams' }));
     await routes.get('POST /api/inventory-upload')({ body: Buffer.from('fixture') }, {});
     assert.equal(response.status, 200);
-    assert.deepEqual(await readPucks(), expectedPucks);
+    const expectedNewPucks = Object.fromEntries(Object.entries(newPucks).map(([name, qty]) => [name, qty * 1000]));
+    assert.deepEqual(await readPucks(), expectedNewPucks);
+    await ctx.rematchLatestInventoryRows();
+    assert.deepEqual(await readPucks(), expectedNewPucks);
 
   } finally {
     db.close();

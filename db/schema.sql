@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS latest_inventory_rows (
   quantity_uom TEXT,
   inventory_uom TEXT,
   grams_per_inventory_unit REAL,
+  conversion_basis TEXT,
   current_qty_grams REAL,
   ingredient_id INTEGER REFERENCES ingredients(id) ON DELETE SET NULL,
   ingredient_name TEXT,

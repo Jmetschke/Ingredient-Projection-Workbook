@@ -335,10 +335,13 @@ function withInventoryConversion(row, matchedName = "", override = null) {
     && Number(row.grams_per_inventory_unit) === 1
     && /^(g|grams?)$/i.test(row.inventory_uom || "");
   const obsoleteKilogramDefault = defaultConversion?.replaces_kilogram_default
+    && !row.conversion_basis
     && Number(row.grams_per_inventory_unit) === 1000
     && /^(kg|kilograms?)$/i.test(row.inventory_uom || "");
   const storedConversion = !legacyGramAssumption && !obsoleteKilogramDefault && Number(row.grams_per_inventory_unit) > 0 ? row : null;
-  const conversion = override || storedConversion || defaultConversion;
+  const conversion = override || storedConversion || (obsoleteKilogramDefault
+    ? { ...defaultConversion, inventory_uom: "Gram", grams_per_inventory_unit: 1 }
+    : defaultConversion);
   const gramsPerInventoryUnit = Number(conversion?.grams_per_inventory_unit);
   const hasGramConversion = row.quantity_uom !== "each" && Number.isFinite(gramsPerInventoryUnit) && gramsPerInventoryUnit > 0;
   const eachPerInventoryUnit = Number(conversion?.each_per_inventory_unit);
@@ -354,6 +357,8 @@ function withInventoryConversion(row, matchedName = "", override = null) {
     quantity_uom: hasEachConversion ? "each" : row.quantity_uom,
     inventory_uom: conversion?.inventory_uom || row.inventory_uom || "Unknown unit",
     grams_per_inventory_unit: hasGramConversion ? gramsPerInventoryUnit : null,
+    conversion_basis: override ? "saved_correction" : obsoleteKilogramDefault ? "legacy_gram_correction"
+      : row.conversion_basis || (storedConversion ? "stored_conversion" : "app_default"),
     current_qty_grams: hasGramConversion ? Number(row.current_qty || 0) * gramsPerInventoryUnit : null,
   };
 }
@@ -537,6 +542,7 @@ async function latestInventoryRows(includeIgnored = false) {
            quantity_uom,
            inventory_uom,
            grams_per_inventory_unit,
+           conversion_basis,
            current_qty_grams,
            ingredient_id,
            ingredient_name,
@@ -600,9 +606,9 @@ async function replaceLatestInventoryRows(rows) {
   for (const row of rows) {
     await run(
       `INSERT INTO latest_inventory_rows
-        (uploaded_name, current_qty, source_qty, ignored_for_upload, quantity_uom, inventory_uom, grams_per_inventory_unit, current_qty_grams,
+        (uploaded_name, current_qty, source_qty, ignored_for_upload, quantity_uom, inventory_uom, grams_per_inventory_unit, conversion_basis, current_qty_grams,
          ingredient_id, ingredient_name, ingredient_type, match_score, match_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.uploaded_name,
         row.current_qty ?? 0,
@@ -611,6 +617,7 @@ async function replaceLatestInventoryRows(rows) {
         row.quantity_uom || guessInventoryUom(row.uploaded_name),
         row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
         row.grams_per_inventory_unit ?? null,
+        row.conversion_basis ?? null,
         row.current_qty_grams ?? null,
         row.ingredient_id || null,
         row.ingredient_name || "",
@@ -632,6 +639,7 @@ async function rematchLatestInventoryRows() {
     quantity_uom: row.quantity_uom || guessInventoryUom(row.uploaded_name),
     inventory_uom: row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
     grams_per_inventory_unit: row.grams_per_inventory_unit,
+    conversion_basis: row.conversion_basis,
   }));
   const matched = matchInventoryRows(rawRows, await activeMasterIngredients(), await inventoryAliasIngredients(), await inventoryUnitOverrides());
   await replaceLatestInventoryRows([...matched, ...existingRows.filter((row) => String(row.match_method || "").startsWith("manual_"))]);
@@ -1860,6 +1868,7 @@ app.post("/api/inventory-adjustments", async (req, res) => {
                quantity_uom,
                inventory_uom,
                grams_per_inventory_unit,
+               conversion_basis,
                current_qty_grams,
                ingredient_name,
                match_method
@@ -2047,7 +2056,7 @@ app.post("/api/inventory-upload/:id/map", async (req, res) => {
       }
       await tx.run(`
         UPDATE latest_inventory_rows
-        SET current_qty = ?, quantity_uom = ?, inventory_uom = ?, grams_per_inventory_unit = ?, current_qty_grams = ?,
+        SET current_qty = ?, quantity_uom = ?, inventory_uom = ?, grams_per_inventory_unit = ?, conversion_basis = ?, current_qty_grams = ?,
             ingredient_id = ?, ingredient_name = ?, ingredient_type = ?, match_score = 1, match_method = 'alias', ignored_for_upload = 0
         WHERE id = ?
       `, [
@@ -2055,6 +2064,7 @@ app.post("/api/inventory-upload/:id/map", async (req, res) => {
         mapped.quantity_uom,
         mapped.inventory_uom,
         mapped.grams_per_inventory_unit ?? null,
+        mapped.conversion_basis ?? null,
         mapped.current_qty_grams ?? null,
         ingredient.id,
         ingredient.name,

@@ -87,11 +87,9 @@ test('saved package sizes resolve package imports, and manual gram adjustments s
   assert.equal(context.withInventoryConversion(manual, 'bees wax', size).current_qty_grams, 500);
 });
 
-test('gram-based puck quantities are not multiplied; blue raspberry remains kilograms', () => {
+test('older unversioned puck imports keep their corrected gram totals', () => {
   for (const [name, quantity] of [['Green Apple Pucks', 470088], ['Mango Pucks', 199955], ['Pineapple Pectin', 197575], ['Watermelon Pucks', 11112.5]]) {
     const raw = { uploaded_name: name, current_qty: quantity, quantity_uom: 'grams' };
-    const fresh = context.withInventoryConversion(raw);
-    assert.equal(fresh.current_qty_grams, quantity);
     const legacy = { ...raw, inventory_uom: 'Kilogram', grams_per_inventory_unit: 1000, current_qty_grams: quantity * 1000 };
     const repaired = context.withInventoryConversion(legacy);
     assert.equal(repaired.current_qty_grams, quantity);
@@ -106,4 +104,17 @@ test('puck default repair preserves explicit corrections and manual gram totals'
   assert.equal(context.withInventoryConversion(row, 'Mango Pucks', { inventory_uom: 'Kilogram', grams_per_inventory_unit: 1000 }).current_qty_grams, 2000);
   assert.equal(context.withInventoryConversion({ ...row, inventory_uom: 'Custom box', grams_per_inventory_unit: 5000 }).current_qty_grams, 10000);
   assert.equal(context.withInventoryConversion({ ...row, match_method: 'manual_update', current_qty: 2000, current_qty_grams: 2000 }).current_qty_grams, 2000);
+});
+
+
+test('new kilogram puck imports convert exactly once and retain their conversion basis', () => {
+  for (const [name, quantity] of [['Green Apple Pucks', 500], ['Mango Pucks', 270], ['Pineapple Pectin', 377], ['Watermelon Pucks', 266]]) {
+    const converted = context.withInventoryConversion({ uploaded_name: name, current_qty: quantity, quantity_uom: 'grams' });
+    assert.equal(converted.current_qty_grams, quantity * 1000);
+    assert.equal(converted.conversion_basis, 'app_default');
+    assert.equal(context.withInventoryConversion(converted).current_qty_grams, quantity * 1000);
+    const grams = context.withInventoryConversion(converted, name, { inventory_uom: 'Gram', grams_per_inventory_unit: 1 });
+    assert.equal(grams.current_qty_grams, quantity);
+    assert.equal(grams.conversion_basis, 'saved_correction');
+  }
 });

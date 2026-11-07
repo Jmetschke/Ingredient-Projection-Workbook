@@ -28,13 +28,14 @@ export const INGREDIENT_UNIT_CONVERSIONS = [
   {"name":"Abstrax Blue Razz","inventory_uom":"Abstrax Gallon","grams_per_inventory_unit":3834},
   {"name":"Flavor - Peppermint","inventory_uom":"Gram","grams_per_inventory_unit":1},
   {"name":"Flavor - Blue Raspberry","inventory_uom":"Gram","grams_per_inventory_unit":1},
-  // These Distru quantities are already grams (confirmed October 29, 2026).
-  // Blue Raspberry Pucks below still reports kilograms.
-  {"name":"Green Apple Pucks","inventory_uom":"Gram","grams_per_inventory_unit":1,"replaces_kilogram_default":true},
-  {"name":"Mango Pucks","inventory_uom":"Gram","grams_per_inventory_unit":1,"replaces_kilogram_default":true},
+  // New Distru uploads use kilograms (confirmed November 7, 2026).
+  // Keep the legacy marker to repair older unversioned kilogram defaults;
+  // conversion_basis distinguishes new kg imports from those older snapshots.
+  {"name":"Green Apple Pucks","inventory_uom":"Kilogram","grams_per_inventory_unit":1000,"replaces_kilogram_default":true},
+  {"name":"Mango Pucks","inventory_uom":"Kilogram","grams_per_inventory_unit":1000,"replaces_kilogram_default":true},
   {"name":"Blue Raspberry Pucks","inventory_uom":"Kilogram","grams_per_inventory_unit":1000},
-  {"name":"Watermelon Pucks","inventory_uom":"Gram","grams_per_inventory_unit":1,"replaces_kilogram_default":true},
-  {"name":"Pineapple Pectin","inventory_uom":"Gram","grams_per_inventory_unit":1,"replaces_kilogram_default":true},
+  {"name":"Watermelon Pucks","inventory_uom":"Kilogram","grams_per_inventory_unit":1000,"replaces_kilogram_default":true},
+  {"name":"Pineapple Pectin","inventory_uom":"Kilogram","grams_per_inventory_unit":1000,"replaces_kilogram_default":true},
   {"name":"Strawberry Pectin","inventory_uom":"Kilogram","grams_per_inventory_unit":1000},
   {"name":"Watermelon Sugar Free Pectin","inventory_uom":"Kilogram","grams_per_inventory_unit":1000},
   {"name":"Bittermod","inventory_uom":"Kilogram","grams_per_inventory_unit":1000},
