@@ -29,7 +29,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20261107-inventory-source-uom-v30";
+const APP_VERSION = "20261109-edit-source-uom-v31";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -1715,6 +1715,7 @@ async function renderInventoryMapping() {
       host.innerHTML = !data.rows.length ? '<div class="empty">Upload an inventory PDF from Ingredient Forecast to review its mappings here.</div>' : !rows.length ? '<div class="empty">No items match this view. Choose All uploaded items to review other mappings.</div>' : table([
         { label: "Uploaded item", value: (row) => escapeHtml(row.uploaded_name) },
         { label: "Parsing breakdown", value: inventoryParsingBreakdown },
+        { label: "Correct Source UOM", value: row => row.ingredient_id ? inventorySourceUnitDetails({ purchase_uom: row.quantity_uom }, [row]) : "Use Edit / Categorize to assign an ingredient and source unit." },
         { label: "Action", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Edit in Ingredient Forecast" : `<div class="mapping-actions"><button type="button" class="small" data-edit-mapping="${row.id}">Edit / Categorize</button><button type="button" class="small secondary" data-ignore-mapping="${row.id}">${row.ignored_for_upload ? 'Restore' : 'Ignore for This Upload'}</button><button type="button" class="small danger" data-delete-mapping="${row.id}">Delete from Upload</button></div>` },
         { label: "Status", value: (row) => row.ignored_for_upload ? 'Ignored for this upload' : inventoryMappingNeedsReview(row) ? 'Needs review' : 'Included' },
         { label: "Matched ingredient", value: (row) => escapeHtml(row.ingredient_name || "Unmatched") },
@@ -1727,6 +1728,7 @@ async function renderInventoryMapping() {
         { label: "Total inventory", value: (row) => row.quantity_uom === "each" ? `${format(row.current_qty)} each` : row.current_qty_grams == null ? "Conversion needed" : `${format(row.current_qty_grams)} g`, numeric: true },
         { label: "Weight source", value: (row) => String(row.match_method || "").startsWith("manual_") ? "Manual inventory" : row.unit_override ? "Saved correction" : "App default — review" },
       ], rows);
+      bindInventorySourceEditors(host, data.rows, renderInventoryMapping, '#inventory-mapping-message');
       const expandButton = document.querySelector('#inventory-mapping-expand');
       expandButton.textContent = 'Expand All Breakdowns';
       expandButton.onclick = () => {
@@ -2597,7 +2599,7 @@ function inventorySourceUnitDetails(ingredient, sources) {
       <span>${row.unit_override ? 'Saved unit correction' : ({ app_default: 'App default for this upload', saved_correction: 'Saved unit correction', legacy_gram_correction: 'Corrected gram unit for an older upload' }[row.conversion_basis] || 'Stored import setting')}</span>
       <b>${escapeHtml(calculation)}</b>
       ${row.ignored_for_upload ? '<span>Ignored for this upload; excluded from on-hand totals. Restore it in Inventory Mapping to edit.</span>' : ''}
-      ${each || row.ignored_for_upload ? '' : `<details><summary>Edit source UOM</summary>
+      ${each || row.ignored_for_upload ? '' : `<details open><summary>Edit source UOM</summary>
         <div class="inventory-source-fields">
           <label>Unit used by the uploaded quantity<select class="inventory-source-unit">${units.map(unit => `<option value="${unit[0]}" ${selected === unit[0] ? 'selected' : ''}>${unit[1]}</option>`).join('')}<option value="custom" ${selected === 'custom' ? 'selected' : ''}>Package / custom unit</option></select></label>
           <label>Source unit / package label<input class="inventory-source-label" maxlength="100" value="${escapeHtml(row.inventory_uom || '')}" ${selected !== 'custom' ? 'readonly' : ''}></label>
@@ -2609,6 +2611,49 @@ function inventorySourceUnitDetails(ingredient, sources) {
         </div></details>`}
     </div>`;
   }).join('');
+}
+
+function bindInventorySourceEditors(host, rows, refresh, messageSelector) {
+  host.querySelectorAll('[data-source-row-id]').forEach(card => {
+    const select = card.querySelector('.inventory-source-unit');
+    if (!select) return;
+    const source = rows.find(row => String(row.id) === card.dataset.sourceRowId);
+    const label = card.querySelector('.inventory-source-label');
+    const factor = card.querySelector('.inventory-source-factor');
+    const preview = () => {
+      card.querySelector('.inventory-source-message').textContent = '';
+      const weight = Number(factor.value);
+      const total = Number(source.current_qty) * weight;
+      card.querySelector('.inventory-source-preview').textContent = weight > 0 && Number.isFinite(total)
+        ? `${qty(source.current_qty)} × ${qty(weight)} g per source unit = ${qty(total)} g on hand`
+        : 'Enter a positive weight in grams for one source unit.';
+    };
+    select.onchange = () => {
+      const unit = { g: ['Gram', 1], kg: ['Kilogram', 1000], lb: ['Pound', 453.59237], oz: ['Ounce', 28.349523125] }[select.value];
+      label.readOnly = factor.readOnly = Boolean(unit);
+      if (unit) { label.value = unit[0]; factor.value = unit[1]; }
+      preview();
+    };
+    factor.oninput = preview;
+    preview();
+    card.querySelector('.save-inventory-source').onclick = async event => {
+      const button = event.currentTarget;
+      const message = card.querySelector('.inventory-source-message');
+      if (!label.value.trim() || !factor.value || !factor.checkValidity() || !Number.isFinite(Number(factor.value) * Number(source.current_qty))) {
+        message.textContent = 'Enter a source unit label and a positive, valid weight in grams.';
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/api/inventory-upload/${source.id}/map`, { method: 'POST', body: JSON.stringify({
+          ingredient_id: source.ingredient_id, current_qty: source.current_qty,
+          inventory_uom: label.value, package_weight: factor.value, weight_unit: 'g',
+        }) });
+        await refresh();
+        setMessage(messageSelector, `Saved source UOM for ${source.uploaded_name}. On-hand grams have been recalculated; the recipe UOM was not changed.`, 'success');
+      } catch (error) { message.textContent = error.message; button.disabled = false; }
+    };
+  });
 }
 
 async function renderInventory() {
@@ -2650,45 +2695,7 @@ async function renderInventory() {
       </table>
     </div>
   ` : `<div class="empty-calendar">No inventory items found.</div>`;
-  document.querySelectorAll('#inventory-table [data-source-row-id]').forEach(card => {
-    const select = card.querySelector('.inventory-source-unit');
-    if (!select) return;
-    const source = inventory.rows.find(row => String(row.id) === card.dataset.sourceRowId);
-    const label = card.querySelector('.inventory-source-label');
-    const factor = card.querySelector('.inventory-source-factor');
-    const preview = () => {
-      const weight = Number(factor.value);
-      const total = Number(source.current_qty) * weight;
-      card.querySelector('.inventory-source-preview').textContent = weight > 0 && Number.isFinite(total)
-        ? `${qty(source.current_qty)} × ${qty(weight)} g per source unit = ${qty(total)} g on hand`
-        : 'Enter a positive weight in grams for one source unit.';
-    };
-    select.onchange = () => {
-      const unit = { g: ['Gram', 1], kg: ['Kilogram', 1000], lb: ['Pound', 453.59237], oz: ['Ounce', 28.349523125] }[select.value];
-      label.readOnly = factor.readOnly = Boolean(unit);
-      if (unit) { label.value = unit[0]; factor.value = unit[1]; }
-      preview();
-    };
-    factor.oninput = preview;
-    preview();
-    card.querySelector('.save-inventory-source').onclick = async event => {
-      const button = event.currentTarget;
-      const message = card.querySelector('.inventory-source-message');
-      if (!label.value.trim() || !factor.value || !factor.checkValidity() || !Number.isFinite(Number(factor.value) * Number(source.current_qty))) {
-        message.textContent = 'Enter a source unit label and a positive, valid weight in grams.';
-        return;
-      }
-      button.disabled = true;
-      try {
-        await api(`/api/inventory-upload/${source.id}/map`, { method: 'POST', body: JSON.stringify({
-          ingredient_id: source.ingredient_id, current_qty: source.current_qty,
-          inventory_uom: label.value, package_weight: factor.value, weight_unit: 'g',
-        }) });
-        await renderInventory();
-        setMessage('#inventory-message', `Saved source UOM for ${source.uploaded_name}. On-hand grams have been recalculated; the recipe UOM was not changed.`, 'success');
-      } catch (error) { message.textContent = error.message; button.disabled = false; }
-    };
-  });
+  bindInventorySourceEditors(document.querySelector('#inventory-table'), inventory.rows, renderInventory, '#inventory-message');
   document.querySelectorAll(".save-inventory").forEach((button) => {
     button.addEventListener("click", async () => {
       const row = button.closest("tr");
