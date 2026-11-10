@@ -29,7 +29,7 @@ const state = {
 };
 let filterRenderTimer;
 
-const APP_VERSION = "20261109-edit-source-uom-v31";
+const APP_VERSION = "20261110-inventory-receiving-v32";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUITE_LOCATION_STORAGE_KEY = "operations-suite-location";
 
@@ -68,6 +68,7 @@ const titles = {
   "batch-ingredient-qty": ["Batch Ingredient QTY", "Calculate ingredients needed for a specific quantity of finished pieces."],
   forecast: ["Ingredient Forecast", "Scheduled BOM usage totals from Production Planner batches."],
   "inventory-mapping": ["Inventory Mapping & Review", "Review and correct inventory matches and package weights."],
+  "inventory-receiving": ["Inventory Receiving", "Record quantities received and add them to on-hand inventory."],
   inventory: ["Inventory", "Add new items to the master inventory list."],
   formulas: ["Formula Manager", "Batch-level BOM setup using grams and each."],
 };
@@ -1889,18 +1890,91 @@ function suggestedIngredientUom(name) {
   return /\b(bottle|cap|pouch|container|vape|tube|paper|glove|net|band)\b/i.test(name) ? "each" : "grams";
 }
 
+const receiptDrafts = new Map();
+let receiptsSaving = false;
+async function renderInventoryReceiving() {
+  const host = document.querySelector('#receiving-table');
+  const ingredients = (await api('/api/ingredients')).filter(row => Number(row.is_master) && Number(row.active) !== 0);
+  host.innerHTML = table([
+    { label: 'Ingredient', value: row => escapeHtml(row.name) },
+    { label: 'On hand', value: row => `<span data-receipt-total="${row.id}">${row.current_inventory_count == null ? 'Unknown' : qty(row.current_inventory_count)} ${row.purchase_uom === 'each' ? 'each' : 'g'}</span>` },
+    { label: 'Qty Received', value: row => `<input aria-label="Qty received for ${escapeHtml(row.name)}" data-receipt-qty="${row.id}" type="number" min="0.000000001" step="any" value="${escapeHtml(receiptDrafts.get(row.id)?.quantity || '')}">` },
+    { label: 'Qty UOM', value: row => `<select aria-label="Receipt UOM for ${escapeHtml(row.name)}" data-receipt-unit="${row.id}">${(row.purchase_uom === 'each' ? [['each','Each']] : [['g','Gram'],['kg','Kilogram'],['lb','Pound (lb)'],['oz','Ounce (oz)']]).map(([value,label]) => `<option value="${value}" ${receiptDrafts.get(row.id)?.unit === value ? 'selected' : ''}>${label}</option>`).join('')}</select>` },
+    { label: 'Save entry', value: row => `<button type="button" data-save-receipt="${row.id}">Save</button><span role="status" data-receipt-message="${row.id}"></span>` },
+  ], ingredients);
+  const save = async selected => {
+    if (receiptsSaving) return;
+    const pending = selected.filter(row => receiptDrafts.get(row.id)?.quantity !== undefined && receiptDrafts.get(row.id).quantity !== '');
+    if (!pending.length) { setMessage('#receiving-message', 'Enter a quantity received first.'); return; }
+    for (const row of pending) {
+      const input = host.querySelector(`[data-receipt-qty="${row.id}"]`);
+      if (!input.checkValidity() || Number(input.value) <= 0) { input.reportValidity(); setMessage('#receiving-message', `Enter a positive quantity for ${row.name}.`, 'error'); return; }
+    }
+    receiptsSaving = true;
+    document.querySelectorAll('#inventory-receiving button, #receiving-table input, #receiving-table select').forEach(el => { el.disabled = true; });
+    let saved = 0;
+    try {
+      for (const row of pending) {
+        const draft = receiptDrafts.get(row.id);
+        const message = host.querySelector(`[data-receipt-message="${row.id}"]`);
+        try {
+          const result = await api('/api/inventory-adjustments', { method: 'POST', body: JSON.stringify({ ingredient_id: row.id, add_qty: draft.quantity, received_uom: draft.unit }) });
+          message.textContent = ` Saved ${draft.quantity} ${draft.unit}.`;
+          receiptDrafts.delete(row.id);
+          host.querySelector(`[data-receipt-qty="${row.id}"]`).value = '';
+          host.querySelector(`[data-receipt-total="${row.id}"]`).textContent = `${qty(result.resulting_qty)} ${result.quantity_uom === 'each' ? 'each' : 'g'}`;
+          saved++;
+        } catch (error) { message.textContent = ` Not saved: ${error.message}`; }
+      }
+      setMessage('#receiving-message', `${saved} of ${pending.length} entries saved.${saved < pending.length ? ' Unsaved entries remain for correction; saved entries will not be submitted again.' : ''}`, saved === pending.length ? 'success' : 'error');
+    } finally {
+      receiptsSaving = false;
+      document.querySelectorAll('#inventory-receiving button, #receiving-table input, #receiving-table select').forEach(el => { el.disabled = false; });
+    }
+  };
+  ingredients.forEach(row => {
+    const input = host.querySelector(`[data-receipt-qty="${row.id}"]`);
+    const unit = host.querySelector(`[data-receipt-unit="${row.id}"]`);
+    const update = () => receiptDrafts.set(row.id, { quantity: input.value, unit: unit.value });
+    input.oninput = update; unit.onchange = update;
+    host.querySelector(`[data-save-receipt="${row.id}"]`).onclick = () => save([row]);
+  });
+  document.querySelectorAll('.save-all-receipts').forEach(button => { button.onclick = () => save(ingredients); });
+}
+
+async function confirmManualInventoryChanges(changes) {
+  const dialog = document.querySelector('#manual-inventory-review');
+  const button = document.querySelector('#confirm-manual-inventory');
+  const host = document.querySelector('#manual-inventory-review-rows');
+  host.innerHTML = changes.map(row => `<label class="manual-change-row"><input type="checkbox"> <span><strong>${escapeHtml(row.name)}</strong>: manual total ${qty(row.previous_qty)} ${row.unit} → report ${row.report_qty == null ? 'unknown (conversion needed)' : `${qty(row.report_qty)} ${row.unit}`}${row.missing ? ' — missing from report; inventory will be removed' : ''}</span></label>`).join('');
+  button.disabled = true;
+  host.onchange = () => { button.disabled = [...host.querySelectorAll('input')].some(input => !input.checked); };
+  dialog.returnValue = 'cancel';
+  dialog.showModal();
+  return new Promise(resolve => { dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), { once: true }); });
+}
+
 async function uploadForecastInventoryPdf(input) {
   const file = input.files?.[0];
   if (!file) return;
   try {
     setMessage("#forecast-inventory-message", "Reading inventory valuation PDF...");
-    const res = await fetch("/api/inventory-upload", {
-      method: "POST",
-      headers: { "Content-Type": file.type || "application/pdf" },
-      body: file,
-    });
-    const payload = await res.json();
-    if (!payload.ok) throw new Error(payload.error);
+    let payload;
+    let confirmation = '';
+    do {
+      const res = await fetch('/api/inventory-upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/pdf', 'X-Inventory-Confirmation': confirmation }, body: file,
+      });
+      payload = await res.json();
+      if (!payload.ok) throw new Error(payload.error);
+      if (payload.data.confirmation_required) {
+        if (!await confirmManualInventoryChanges(payload.data.changes)) {
+          setMessage('#forecast-inventory-message', 'Upload canceled. Current inventory was kept.');
+          return;
+        }
+        confirmation = payload.data.confirmation_token;
+      }
+    } while (payload.data.confirmation_required);
     await renderForecast();
     const missingWeights = payload.data.rows.filter(row => row.quantity_uom !== 'each' && row.current_qty_grams == null);
     setMessage(
@@ -3083,6 +3157,7 @@ const renderers = {
   "batch-ingredient-qty": renderBatchIngredientQty,
   forecast: renderForecast,
   inventory: renderInventory,
+  "inventory-receiving": renderInventoryReceiving,
   "inventory-mapping": renderInventoryMapping,
   formulas: renderFormulas,
 };

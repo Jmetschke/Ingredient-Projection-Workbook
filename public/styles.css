@@ -2046,3 +2046,8 @@ pre {
 #forecast-search-help {
   flex-basis: 100%;
 }
+#manual-inventory-review { width: min(850px, 90vw); max-height: 85vh; overflow: auto; }
+.manual-change-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #ddd; }
+.manual-change-row input { width: auto; }
+#receiving-table { margin: 18px 0; overflow-x: auto; }
+#receiving-table [role="status"] { display: block; max-width: 300px; }

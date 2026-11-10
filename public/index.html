@@ -47,6 +47,7 @@
         <button data-tab="forecast">Ingredient Forecast</button>
         <button data-tab="shortage-report">Shortage Report</button>
         <button data-tab="inventory">Inventory</button>
+        <button data-tab="inventory-receiving">Inventory Receiving</button>
         <button data-tab="inventory-mapping">Inventory Mapping &amp; Review</button>
         <button data-tab="formulas">Formula Manager</button>
       </nav>
@@ -486,6 +487,23 @@
         <div id="inventory-review-content"></div>
       </dialog>
 
+      <section id="inventory-receiving" class="view">
+        <h2>Inventory Receiving</h2>
+        <p>Enter quantities received to add to current inventory. These totals last until the next report upload. Changes to manually entered totals will require confirmation before that report is applied.</p>
+        <button type="button" class="save-all-receipts">Save All Changes</button>
+        <p id="receiving-message" role="status"></p>
+        <div id="receiving-table"></div>
+        <button type="button" class="save-all-receipts">Save All Changes</button>
+      </section>
+      <dialog id="manual-inventory-review">
+        <form method="dialog">
+          <h2>Review changes to manual inventory</h2>
+          <p>The new report replaces the current inventory. Confirm each changed manual total below. Cancel keeps your inventory unchanged.</p>
+          <div id="manual-inventory-review-rows"></div>
+          <button value="cancel">Cancel Upload</button>
+          <button id="confirm-manual-inventory" value="confirm" disabled>Confirm Changes &amp; Upload</button>
+        </form>
+      </dialog>
       <section id="inventory" class="view">
         <div class="section-head">
           <h2>Add Inventory Item</h2>
@@ -621,6 +639,6 @@
 
     </main>
 
-    <script src="/app.js?v=20261109-edit-source-uom-v31"></script>
+    <script src="/app.js?v=20261110-inventory-receiving-v32"></script>
   </body>
 </html>

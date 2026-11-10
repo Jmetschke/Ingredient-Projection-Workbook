@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { manualInventoryChanges } from '../src/inventory-receiving.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -59,6 +61,14 @@ test('saved package sizes survive uploads and invalid changes; saving never alte
     const register = method => (url, ...handlers) => routes.set(`${method} ${url}`, handlers.at(-1));
     let response;
     const ctx = vm.createContext({
+      withTransaction: async callback => {
+        const tx = await db.transaction("write");
+        try {
+          const value = await callback({ run: async (sql, args = []) => tx.execute({ sql, args }) });
+          await tx.commit(); return value;
+        } catch (error) { await tx.rollback(); throw error; } finally { tx.close(); }
+      },
+      createHash, manualInventoryChanges,
       all, one, run, Buffer, inventoryWeightConversion, resolveInventoryPackageSize, bomUomForIngredient, INGREDIENT_UNIT_CONVERSION_BY_NAME,
       INGREDIENT_TYPES: new Set(['SB', 'Hijnx', 'SB/Hijnx']),
       app: { get: register('GET'), put: register('PUT'), post: register('POST'), delete: register('DELETE') },

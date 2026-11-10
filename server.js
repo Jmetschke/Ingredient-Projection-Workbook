@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { receivedInventoryQuantity, manualInventoryChanges } from './src/inventory-receiving.js';
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -602,31 +604,33 @@ async function inventoryUnitOverrides() {
 }
 
 async function replaceLatestInventoryRows(rows) {
-  await run("DELETE FROM latest_inventory_rows");
-  for (const row of rows) {
-    await run(
-      `INSERT INTO latest_inventory_rows
-        (uploaded_name, current_qty, source_qty, ignored_for_upload, quantity_uom, inventory_uom, grams_per_inventory_unit, conversion_basis, current_qty_grams,
-         ingredient_id, ingredient_name, ingredient_type, match_score, match_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        row.uploaded_name,
-        row.current_qty ?? 0,
-        row.source_qty ?? null,
-        row.ignored_for_upload ? 1 : 0,
-        row.quantity_uom || guessInventoryUom(row.uploaded_name),
-        row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
-        row.grams_per_inventory_unit ?? null,
-        row.conversion_basis ?? null,
-        row.current_qty_grams ?? null,
-        row.ingredient_id || null,
-        row.ingredient_name || "",
-        normalizeIngredientType(row.ingredient_type),
-        row.match_score ?? null,
-        row.match_method || "unmatched",
-      ],
-    );
-  }
+  await withTransaction(async tx => {
+    await tx.run("DELETE FROM latest_inventory_rows");
+    for (const row of rows) {
+      await tx.run(
+        `INSERT INTO latest_inventory_rows
+          (uploaded_name, current_qty, source_qty, ignored_for_upload, quantity_uom, inventory_uom, grams_per_inventory_unit, conversion_basis, current_qty_grams,
+           ingredient_id, ingredient_name, ingredient_type, match_score, match_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.uploaded_name,
+          row.current_qty ?? 0,
+          row.source_qty ?? null,
+          row.ignored_for_upload ? 1 : 0,
+          row.quantity_uom || guessInventoryUom(row.uploaded_name),
+          row.inventory_uom || row.quantity_uom || guessInventoryUom(row.uploaded_name),
+          row.grams_per_inventory_unit ?? null,
+          row.conversion_basis ?? null,
+          row.current_qty_grams ?? null,
+          row.ingredient_id || null,
+          row.ingredient_name || "",
+          normalizeIngredientType(row.ingredient_type),
+          row.match_score ?? null,
+          row.match_method || "unmatched",
+        ],
+      );
+    }
+  });
 }
 
 async function rematchLatestInventoryRows() {
@@ -1843,7 +1847,7 @@ app.post("/api/inventory-adjustments", async (req, res) => {
     if (hasAdd === hasUpdate) {
       return fail(res, new Error("Enter either an Add quantity or an Update quantity, but not both"), 400);
     }
-    const enteredQty = Number(hasAdd ? req.body.add_qty : req.body.update_qty);
+    let enteredQty = Number(hasAdd ? req.body.add_qty : req.body.update_qty);
     if (!Number.isFinite(enteredQty) || (hasAdd ? enteredQty <= 0 : enteredQty < 0)) {
       return fail(res, new Error(hasAdd
         ? "Add quantity must be greater than zero"
@@ -1858,6 +1862,7 @@ app.post("/api/inventory-adjustments", async (req, res) => {
       if (!rawIngredient) throw new Error("Select a valid master ingredient");
       const ingredient = withBomUom(rawIngredient);
       const quantityUom = ingredient.bom_uom || "grams";
+      if (req.body.received_uom !== undefined) enteredQty = receivedInventoryQuantity(enteredQty, req.body.received_uom, quantityUom);
       const inventoryConversion = inventoryConversionForName(ingredient.name);
       const storedInventoryUom = quantityUom === "each" && Number(inventoryConversion?.each_per_inventory_unit) > 0
         ? inventoryConversion.inventory_uom
@@ -1965,6 +1970,12 @@ app.post("/api/inventory-upload", express.raw({ type: ["application/pdf", "appli
       const override = unitOverrides.get(normalizeMatchText(row.uploaded_name));
       return packageSizes.has(String(row.ingredient_id)) || (override && override.ingredient_id === row.ingredient_id);
     }).map((row) => row.ingredient_name || row.uploaded_name));
+    const existing = await latestInventoryRows();
+    const changes = manualInventoryChanges(existing, matchedRows);
+    const confirmationToken = createHash('sha256').update(buffer).update(JSON.stringify(existing)).update(JSON.stringify(matchedRows)).digest('hex');
+    if (changes.length && req.get('X-Inventory-Confirmation') !== confirmationToken) {
+      return ok(res, { confirmation_required: true, confirmation_token: confirmationToken, changes });
+    }
     await replaceLatestInventoryRows(matchedRows);
     const savedRows = await latestInventoryRows();
     ok(res, {
